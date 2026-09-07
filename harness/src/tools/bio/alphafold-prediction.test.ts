@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 
 import { readFixture } from "../lib/__fixtures__/fixture-runner.js";
 import { makeToolContext } from "../__fixtures__/tool-context.js";
-import { getStructurePredictionTool } from "./get-structure-prediction.js";
+import { alphafoldPredictionTool } from "./alphafold-prediction.js";
 
 const realFetch = globalThis.fetch;
 
@@ -14,12 +14,12 @@ function stubResponse(status: number, body: unknown): void {
     globalThis.fetch = (async () => new Response(typeof body === "string" ? body : JSON.stringify(body), { status })) as unknown as typeof fetch;
 }
 
-describe("getStructurePrediction — a known accession", () => {
+describe("alphafoldPrediction — an accession with a model", () => {
     it("returns the model metadata, confidence, and artifact URLs", async () => {
         stubResponse(200, readFixture("alphafold", "prediction-P69905.json"));
 
         const { ctx } = makeToolContext();
-        const out = (await getStructurePredictionTool.execute({ uniprotAccession: "P69905" }, ctx))._unsafeUnwrap();
+        const out = (await alphafoldPredictionTool.execute({ uniprotAccession: "P69905" }, ctx))._unsafeUnwrap();
 
         expect(out).toEqual({
             found: true,
@@ -43,7 +43,7 @@ describe("getStructurePrediction — a known accession", () => {
         stubResponse(200, readFixture("alphafold", "prediction-P38398.json"));
 
         const { ctx } = makeToolContext();
-        const out = (await getStructurePredictionTool.execute({ uniprotAccession: "P38398" }, ctx))._unsafeUnwrap();
+        const out = (await alphafoldPredictionTool.execute({ uniprotAccession: "P38398" }, ctx))._unsafeUnwrap();
 
         expect(out.found).toBe(true);
         if (out.found) {
@@ -58,7 +58,7 @@ describe("getStructurePrediction — a known accession", () => {
         stubResponse(200, readFixture("alphafold", "prediction-P38398.json"));
 
         const { ctx } = makeToolContext();
-        const out = (await getStructurePredictionTool.execute({ uniprotAccession: "P38398-8" }, ctx))._unsafeUnwrap();
+        const out = (await alphafoldPredictionTool.execute({ uniprotAccession: "P38398-8" }, ctx))._unsafeUnwrap();
 
         expect(out.found).toBe(true);
         if (out.found) {
@@ -69,28 +69,40 @@ describe("getStructurePrediction — a known accession", () => {
     });
 });
 
-describe("getStructurePrediction — an accession AlphaFold does not recognize", () => {
+describe("alphafoldPrediction — an accession with no model", () => {
+    // AlphaFold splits absence over two status codes, and both mean the same
+    // thing to a caller: a well-formed accession it holds no model for answers
+    // 404, and an identifier it cannot parse answers 400.
+    it("returns found: false on a 404, not an is_error", async () => {
+        stubResponse(404, {});
+
+        const { ctx } = makeToolContext();
+        const out = (await alphafoldPredictionTool.execute({ uniprotAccession: "Q0Q0Q0" }, ctx))._unsafeUnwrap();
+
+        expect(out).toEqual({ found: false, uniprotAccession: "Q0Q0Q0" });
+    });
+
     it("returns found: false on a 400, not an is_error", async () => {
         stubResponse(400, { error: "Invalid identifier format. Please use a UniProt accession or a supported AlphaFold DB ID." });
 
         const { ctx } = makeToolContext();
-        const out = (await getStructurePredictionTool.execute({ uniprotAccession: "NOTANACC" }, ctx))._unsafeUnwrap();
+        const out = (await alphafoldPredictionTool.execute({ uniprotAccession: "NOTANACC" }, ctx))._unsafeUnwrap();
 
         expect(out).toEqual({ found: false, uniprotAccession: "NOTANACC" });
     });
 });
 
-describe("getStructurePrediction — an upstream failure", () => {
+describe("alphafoldPrediction — an upstream failure", () => {
     it("throws on a 5xx", async () => {
         stubResponse(500, "upstream down");
 
         const { ctx } = makeToolContext();
-        await expect(getStructurePredictionTool.execute({ uniprotAccession: "P38398" }, ctx)).rejects.toThrow();
+        await expect(alphafoldPredictionTool.execute({ uniprotAccession: "P38398" }, ctx)).rejects.toThrow();
     });
 });
 
-describe("getStructurePrediction — describeCall", () => {
+describe("alphafoldPrediction — describeCall", () => {
     it("names the queried accession", () => {
-        expect(getStructurePredictionTool.describeCall!({ uniprotAccession: "P38398" })).toBe("P38398");
+        expect(alphafoldPredictionTool.describeCall!({ uniprotAccession: "P38398" })).toBe("P38398");
     });
 });

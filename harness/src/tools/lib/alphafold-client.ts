@@ -9,9 +9,12 @@
  * from an isoform entry — thus a maybe-absent field carries `.optional()`,
  * not `.nullable()`.
  *
- * Not-found semantics: AlphaFold answers HTTP 400, not 404, for an accession
- * it does not recognize. `isUnexpectedApiError` treats every 4xx as expected,
- * thus a 400 here still reads as `null` — an ordinary miss, not a failure.
+ * Not-found semantics: AlphaFold splits absence over two status codes. An
+ * identifier that does not parse as a UniProt accession or an AlphaFold DB id
+ * gives 400 with an `Invalid identifier format` body. A well-formed accession
+ * that AlphaFold holds no model for gives 404 with an empty object. Both are
+ * the same outcome for a caller, and `isUnexpectedApiError` classifies each
+ * `http_status` in the 4xx range as expected, thus one branch answers both.
  */
 
 import { z } from "zod";
@@ -36,10 +39,10 @@ export const AlphaFoldPredictionSchema = z.object({
     fractionPlddtLow: z.number(),
     fractionPlddtConfident: z.number(),
     fractionPlddtVeryHigh: z.number(),
-    pdbUrl: z.string(),
-    cifUrl: z.string(),
-    paeImageUrl: z.string(),
-    amAnnotationsUrl: z.string().optional(),
+    pdbUrl: z.url(),
+    cifUrl: z.url(),
+    paeImageUrl: z.url(),
+    amAnnotationsUrl: z.url().optional(),
 });
 
 export type AlphaFoldPrediction = z.infer<typeof AlphaFoldPredictionSchema>;
@@ -47,13 +50,14 @@ export type AlphaFoldPrediction = z.infer<typeof AlphaFoldPredictionSchema>;
 /**
  * Fetch the AlphaFold structure prediction for one UniProt accession.
  *
- * Gives `null` for an accession AlphaFold does not recognize (HTTP 400, or an
- * empty answer). When the array holds more than one entry — the isoforms of
- * one canonical accession — the entry whose own `uniprotAccession` matches the
- * queried accession wins; a query that names no exact isoform falls back to
- * the first entry, which AlphaFold always orders canonical-first.
+ * Gives `null` when AlphaFold holds no model for the accession, and `null` for
+ * an identifier it cannot parse. When the array holds more than one entry —
+ * the isoforms of one canonical accession — the entry whose own
+ * `uniprotAccession` matches the queried accession wins. A query that names no
+ * exact isoform falls back to the first entry, which AlphaFold orders
+ * canonical-first.
  */
-export async function getStructurePrediction(uniprotAccession: string): Promise<AlphaFoldPrediction | null> {
+export async function fetchAlphaFoldPrediction(uniprotAccession: string): Promise<AlphaFoldPrediction | null> {
     const accession = uniprotAccession.trim();
     const res = await apiFetchValidated(`${ALPHAFOLD_BASE}/${encodeURIComponent(accession)}`, z.array(AlphaFoldPredictionSchema));
 

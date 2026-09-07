@@ -33,8 +33,6 @@ export type SandboxToolName =
     // Functional annotation (GO / KEGG / Reactome) and STRING networks + enrichment.
     | "lookupAnnotation"
     | "searchInteractions"
-    // Structural biology — per-residue confidence of a predicted 3-D model.
-    | "getStructurePrediction"
     // ChEMBL (compounds / drug / mechanism / bioactivity / targets behind one action).
     | "chembl"
     // PubChem (compound / crossrefs / assays behind one action).
