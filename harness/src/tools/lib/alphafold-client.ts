@@ -5,9 +5,10 @@
  *
  * Absence policy: AlphaFold DB omits the key of an absent value — the
  * AlphaMissense annotation URLs (`amAnnotationsUrl` and its two genome-build
- * siblings) are present only for a canonical UniProt accession, and absent
- * from an isoform entry — thus a maybe-absent field carries `.optional()`,
- * not `.nullable()`.
+ * siblings) ride on the AlphaMissense proteome-wide predictions, which cover
+ * the human proteome only. A canonical accession of a different organism
+ * carries no such URL, and neither does an isoform entry of any organism —
+ * thus a maybe-absent field carries `.optional()`, not `.nullable()`.
  *
  * Not-found semantics: AlphaFold splits absence over two status codes. An
  * identifier that does not parse as a UniProt accession or an AlphaFold DB id
@@ -42,6 +43,11 @@ export const AlphaFoldPredictionSchema = z.object({
     pdbUrl: z.url(),
     cifUrl: z.url(),
     paeImageUrl: z.url(),
+    // The per-residue confidence document. `globalMetricValue` and the
+    // `fractionPlddt*` fractions describe the whole chain, thus this URL is the
+    // only field that tells a caller *which* residues are disordered.
+    plddtDocUrl: z.url(),
+    paeDocUrl: z.url(),
     amAnnotationsUrl: z.url().optional(),
 });
 

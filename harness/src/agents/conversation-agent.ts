@@ -244,7 +244,8 @@ export function createConversationAgent(deps: ConversationAgentDeps): AgentDefin
         // STRING networks + gene-set enrichment.
         lookupAnnotationTool,
         searchInteractionsTool,
-        // Structural biology — per-residue confidence of a predicted 3-D model.
+        // Structural biology — the whole-chain confidence of a predicted 3-D
+        // model, and the URLs of its coordinate and per-residue files.
         alphafoldPredictionTool,
         // Literature (search / details / fulltext behind one action).
         ncbi.pubmed,
