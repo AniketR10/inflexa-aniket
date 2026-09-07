@@ -46,7 +46,6 @@ import { createInspectDataProfileTool } from "../../tools/research/inspect-data-
 import {
     chemblTool,
     genePreclinicalProfileTool,
-    getStructurePredictionTool,
     lookupAnnotationTool,
     openTargetsTool,
     pubchemTool,
@@ -198,7 +197,6 @@ function resolveSandboxTools(deps: SandboxAgentDeps, tools: readonly SandboxTool
         searchGene: searchGeneTool,
         lookupAnnotation: lookupAnnotationTool,
         searchInteractions: searchInteractionsTool,
-        getStructurePrediction: getStructurePredictionTool,
         chembl: chemblTool,
         pubchem: pubchemTool,
         opentargets: openTargetsTool,

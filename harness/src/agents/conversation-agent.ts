@@ -46,7 +46,7 @@ import {
     searchGeneTool,
     lookupAnnotationTool,
     searchInteractionsTool,
-    getStructurePredictionTool,
+    alphafoldPredictionTool,
     chemblTool,
     pubchemTool,
     openTargetsTool,
@@ -245,7 +245,7 @@ export function createConversationAgent(deps: ConversationAgentDeps): AgentDefin
         lookupAnnotationTool,
         searchInteractionsTool,
         // Structural biology — per-residue confidence of a predicted 3-D model.
-        getStructurePredictionTool,
+        alphafoldPredictionTool,
         // Literature (search / details / fulltext behind one action).
         ncbi.pubmed,
         // Verification of one caller-supplied citation (distinct from discovery).

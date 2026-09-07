@@ -28,7 +28,7 @@ export * from "./lookup-annotation.js";
 export * from "./search-interactions.js";
 
 // Structural biology
-export * from "./get-structure-prediction.js";
+export * from "./alphafold-prediction.js";
 
 // Literature
 export * from "./pubmed.js";
