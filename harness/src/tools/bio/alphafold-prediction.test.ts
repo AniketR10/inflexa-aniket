@@ -35,6 +35,8 @@ describe("alphafoldPrediction — an accession with a model", () => {
             pdbUrl: "https://alphafold.ebi.ac.uk/files/AF-P69905-F1-model_v6.pdb",
             cifUrl: "https://alphafold.ebi.ac.uk/files/AF-P69905-F1-model_v6.cif",
             paeImageUrl: "https://alphafold.ebi.ac.uk/files/AF-P69905-F1-predicted_aligned_error_v6.png",
+            plddtDocUrl: "https://alphafold.ebi.ac.uk/files/AF-P69905-F1-confidence_v6.json",
+            paeDocUrl: "https://alphafold.ebi.ac.uk/files/AF-P69905-F1-predicted_aligned_error_v6.json",
             amAnnotationsUrl: "https://alphafold.ebi.ac.uk/files/AF-P69905-F1-aa-substitutions.csv",
         });
     });
@@ -65,6 +67,9 @@ describe("alphafoldPrediction — an accession with a model", () => {
             expect(out.uniprotAccession).toBe("P38398-8");
             // The isoform entry carries no AlphaMissense annotation link.
             expect(out.amAnnotationsUrl).toBeUndefined();
+            // But it does carry the per-residue confidence document, which is
+            // the field that locates the disorder of the isoform.
+            expect(out.plddtDocUrl).toBe("https://alphafold.ebi.ac.uk/files/AF-P38398-8-F1-confidence_v6.json");
         }
     });
 });
@@ -89,6 +94,15 @@ describe("alphafoldPrediction — an accession with no model", () => {
         const out = (await alphafoldPredictionTool.execute({ uniprotAccession: "NOTANACC" }, ctx))._unsafeUnwrap();
 
         expect(out).toEqual({ found: false, uniprotAccession: "NOTANACC" });
+    });
+
+    it("echoes the trimmed accession, not the padded argument", async () => {
+        stubResponse(404, {});
+
+        const { ctx } = makeToolContext();
+        const out = (await alphafoldPredictionTool.execute({ uniprotAccession: "  P38398  " }, ctx))._unsafeUnwrap();
+
+        expect(out).toEqual({ found: false, uniprotAccession: "P38398" });
     });
 });
 

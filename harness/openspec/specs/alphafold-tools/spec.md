@@ -27,7 +27,7 @@ belongs in the sandbox instead.
 
 Second, `globalMetricValue` is the mean pLDDT over the whole chain, not a
 pass/fail confidence score. A low value can still be correct: BRCA1 scores
-41.59, because BRCA1 is largely disordered. The tool description bands
+about 41, because BRCA1 is largely disordered. The tool description bands
 the value:
 
 - above 90 is very high
@@ -36,6 +36,13 @@ the value:
 - below 50 is very low or disordered
 
 Thus an agent does not read a low score as a failed prediction.
+
+The mean and the four `fractionPlddt*` fractions describe the whole chain.
+Neither one locates a region. Thus the tool also returns `plddtDocUrl`, which
+is the per-residue pLDDT document. An agent that must tell a folded domain
+from a disordered loop reads that document from the sandbox. The document of
+BRCA1 is about 26 kB, thus the size rule of the coordinate files does not
+apply to it.
 
 Citations:
 
@@ -52,8 +59,10 @@ The system MUST give an `alphafoldPredictionTool` (on-wire id
 `ok({ found: true, uniprotAccession, uniprotDescription, latestVersion,
 modelCreatedDate, globalMetricValue, fractionPlddtVeryLow, fractionPlddtLow,
 fractionPlddtConfident, fractionPlddtVeryHigh, pdbUrl, cifUrl, paeImageUrl,
-amAnnotationsUrl? })`. For an accession with no model, and for an identifier
-that does not parse, it MUST return `ok({ found: false, uniprotAccession })`.
+plddtDocUrl, paeDocUrl, amAnnotationsUrl? })`. For an accession with no model,
+and for an identifier that does not parse, it MUST return
+`ok({ found: false, uniprotAccession })`. The tool MUST trim the accession
+before it makes the request, and the miss MUST echo the trimmed value.
 
 #### Scenario: A canonical accession returns its model
 
@@ -63,7 +72,12 @@ that does not parse, it MUST return `ok({ found: false, uniprotAccession })`.
 #### Scenario: A largely disordered protein reports its real mean pLDDT
 
 - **WHEN** the tool is called with `uniprotAccession: "P38398"` (BRCA1)
-- **THEN** `globalMetricValue` is 41.59, and the tool description states that a low value reflects genuine disorder, not a failed prediction
+- **THEN** `globalMetricValue` is below 50, and the tool description states that a low value reflects genuine disorder, not a failed prediction
+
+#### Scenario: A padded accession echoes in its trimmed form
+
+- **WHEN** the tool is called with `uniprotAccession: "  P38398  "` and AlphaFold holds no model for it
+- **THEN** it returns `ok({ found: false, uniprotAccession: "P38398" })`
 
 #### Scenario: A multi-isoform response is resolved to the queried accession
 
@@ -101,20 +115,35 @@ the accession alone.
 `harness/src/tools/lib/alphafold-client.ts` MUST validate the response with a
 zod schema over `z.array(...)`, because one query can answer with more than one
 isoform entry. Each artifact-link field MUST carry `z.url()`, not `z.string()`.
+The schema MUST hold `plddtDocUrl` and `paeDocUrl` as required fields, because
+AlphaFold gives both for each model.
+
 A comment at the top of the client MUST name the absence policy. AlphaFold DB
-omits the key of an absent value. The AlphaMissense annotation URL is present
-only for a canonical accession, thus the field carries `.optional()` and not
-`.nullable()`.
+omits the key of an absent value. The AlphaMissense annotation URLs come from
+the AlphaMissense predictions, which cover the human proteome only. Thus a
+canonical accession of a different organism carries no such URL, and an isoform
+entry of any organism carries none. As a result the field carries `.optional()`
+and not `.nullable()`.
 
-#### Scenario: A canonical accession carries the AlphaMissense annotation URL
+#### Scenario: A human canonical accession carries the AlphaMissense annotation URL
 
-- **WHEN** the queried entry is a canonical UniProt accession
+- **WHEN** the queried entry is a canonical UniProt accession of *Homo sapiens*, for example `P01308` (insulin)
 - **THEN** `amAnnotationsUrl` is present
+
+#### Scenario: A non-human canonical accession omits the AlphaMissense annotation URL
+
+- **WHEN** the queried entry is a canonical UniProt accession of a different organism, for example `P01326` (mouse insulin-2) or `P0DTC2` (SARS-CoV-2 spike glycoprotein)
+- **THEN** `amAnnotationsUrl` is absent from the parsed record, and the parse succeeds
 
 #### Scenario: A non-canonical isoform entry omits the AlphaMissense annotation URL
 
 - **WHEN** the queried entry is a non-canonical isoform
 - **THEN** `amAnnotationsUrl` is absent from the parsed record, and it is not `null`
+
+#### Scenario: Each entry carries the per-residue confidence document
+
+- **WHEN** the client parses an entry, for a canonical accession or for an isoform
+- **THEN** `plddtDocUrl` and `paeDocUrl` are present
 
 ### Requirement: alphafold_prediction is available to the conversation agent only
 

@@ -16,6 +16,7 @@ runFixtureSuite("AlphaFold DB golden fixtures", [
             const entry = entries[0]!;
             expect(entry.uniprotAccession).toBe("P69905");
             expect(entry.globalMetricValue).toBe(98.06);
+            expect(entry.plddtDocUrl).toBe("https://alphafold.ebi.ac.uk/files/AF-P69905-F1-confidence_v6.json");
             expect(entry.amAnnotationsUrl).toBe("https://alphafold.ebi.ac.uk/files/AF-P69905-F1-aa-substitutions.csv");
         },
     }),

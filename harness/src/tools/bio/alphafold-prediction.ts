@@ -19,21 +19,27 @@ export type AlphaFoldPredictionOutput = { readonly found: false; readonly unipro
 export const alphafoldPredictionTool = defineTool({
     id: "alphafold_prediction",
     description:
-        "AlphaFold DB — the predicted 3-D protein structure of EMBL-EBI and DeepMind, keyed by a UniProt accession ('P38398'). Per-residue confidence " +
+        "AlphaFold DB — the predicted 3-D protein structure of EMBL-EBI and DeepMind, keyed by a UniProt accession ('P38398'). Predicted confidence " +
         "(pLDDT), not experimental certainty: it tells apart a folded domain from a disordered loop, it does not replace a solved structure.\n" +
-        "`globalMetricValue` is the mean pLDDT over the whole chain, banded by `fractionPlddt*`: above 90 is very high, 70 to 90 is confident, 50 to 70 " +
-        "is low, and below 50 is very low or disordered. A LOW globalMetricValue is not a failed prediction — BRCA1 scores 41.59 because BRCA1 is " +
-        "largely disordered, and AlphaFold reports that correctly.\n" +
-        "Returns URLs only (`pdbUrl`, `cifUrl`, `paeImageUrl`, `amAnnotationsUrl` — AlphaMissense pathogenicity annotations, present for a canonical " +
-        "accession only): fetch one from the sandbox to inspect the coordinates or the annotation table, do not expect the file contents here.\n" +
+        "`globalMetricValue` is the mean pLDDT over the whole chain, and each `fractionPlddt*` is the fraction of residues in one band: above 90 is " +
+        "very high, 70 to 90 is confident, 50 to 70 is low, and below 50 is very low or disordered. A LOW globalMetricValue is not a failed " +
+        "prediction — BRCA1 scores about 41 because BRCA1 is largely disordered, and AlphaFold reports that correctly. Both values describe the whole " +
+        "chain and neither locates a region: `plddtDocUrl` holds the per-residue pLDDT that does.\n" +
+        "Returns URLs only (`pdbUrl`, `cifUrl`, `paeImageUrl`, `plddtDocUrl` — the per-residue confidence, `paeDocUrl` — the predicted aligned error " +
+        "matrix, `amAnnotationsUrl` — AlphaMissense pathogenicity annotations, present for a HUMAN canonical accession only, thus absent on a " +
+        "non-human protein and on an isoform): fetch one from the sandbox to inspect the coordinates, the per-residue confidence, or the annotation " +
+        "table, do not expect the file contents here.\n" +
         "found: false means AlphaFold holds no model for the accession (not every UniProt entry has one) — report it and continue, do not retry.",
     inputSchema: z.object({
         uniprotAccession: z.string().min(1).describe("A UniProt accession, for example 'P38398' (BRCA1) or 'P69905' (hemoglobin subunit alpha)."),
     }),
     describeCall: ({ uniprotAccession }) => uniprotAccession,
     execute: async ({ uniprotAccession }): Promise<Result<AlphaFoldPredictionOutput, ToolError>> => {
-        const prediction = await fetchAlphaFoldPrediction(uniprotAccession);
-        if (!prediction) return ok({ found: false as const, uniprotAccession });
+        // The client trims before it builds the URL, thus a miss echoes the same
+        // accession that the request carried and not the padded argument.
+        const accession = uniprotAccession.trim();
+        const prediction = await fetchAlphaFoldPrediction(accession);
+        if (!prediction) return ok({ found: false as const, uniprotAccession: accession });
         return ok({ found: true as const, ...prediction });
     },
 });
