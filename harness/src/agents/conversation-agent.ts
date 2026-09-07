@@ -46,6 +46,7 @@ import {
     searchGeneTool,
     lookupAnnotationTool,
     searchInteractionsTool,
+    getStructurePredictionTool,
     chemblTool,
     pubchemTool,
     openTargetsTool,
@@ -243,6 +244,8 @@ export function createConversationAgent(deps: ConversationAgentDeps): AgentDefin
         // STRING networks + gene-set enrichment.
         lookupAnnotationTool,
         searchInteractionsTool,
+        // Structural biology — per-residue confidence of a predicted 3-D model.
+        getStructurePredictionTool,
         // Literature (search / details / fulltext behind one action).
         ncbi.pubmed,
         // Verification of one caller-supplied citation (distinct from discovery).

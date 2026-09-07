@@ -1,0 +1,11 @@
+{
+    "prediction-P69905.json": {
+        "url": "https://alphafold.ebi.ac.uk/api/prediction/P69905",
+        "capturedAt": "2026-09-07"
+    },
+    "prediction-P38398.json": {
+        "url": "https://alphafold.ebi.ac.uk/api/prediction/P38398",
+        "capturedAt": "2026-09-07",
+        "replay": false
+    }
+}
