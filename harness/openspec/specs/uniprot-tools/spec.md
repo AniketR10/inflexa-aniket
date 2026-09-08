@@ -37,6 +37,12 @@ The narrowing filters stay off the accession side. An accession is a unique
 key, and `accession:P02769` under the human default would otherwise answer
 nothing, although that accession names bovine serum albumin.
 
+The accession side carries `active:true`, and that is the one filter it takes.
+A deleted accession still answers an `accession:` query, as an `Inactive` row
+with no name and no function, and the mapper has no field for the deletion
+reason. `B3GAT1` names one such accession. Thus the filter removes that hollow
+row from the answer.
+
 Third, the answer is bounded and it says so. UniProt reports its match count in
 the `x-total-results` header, and `apiFetch` exposes no header. Thus the client
 asks for one row beyond the limit and reports `hasMore`. That separates a
@@ -68,6 +74,11 @@ organism), `reviewedOnly` (default true), and `limit`. It MUST return
 
 - **WHEN** the `query` is an accession that names an entry of another organism, for example `P02769` under the default `organismId` of 9606
 - **THEN** the `organism_id:` and `reviewed:true` clauses bind the `gene_exact:` side only, and the accession still resolves
+
+#### Scenario: A deleted accession does not answer
+
+- **WHEN** the `query` is accession-shaped and it also names a deleted entry, for example `B3GAT1`
+- **THEN** the `accession:` clause carries `active:true`, thus the `Inactive` row does not answer, and the `gene_exact:` side still resolves the human protein
 
 #### Scenario: A symbol that is not accession-shaped sends no accession clause
 

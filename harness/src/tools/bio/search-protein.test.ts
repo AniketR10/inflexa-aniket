@@ -85,7 +85,7 @@ describe("searchProtein — a resolved symbol", () => {
 
         await callSearchProtein({ query: "P2RY12" });
 
-        expect(sentQuery()).toBe("(accession:P2RY12 OR (gene_exact:P2RY12 AND organism_id:9606 AND reviewed:true))");
+        expect(sentQuery()).toBe("((accession:P2RY12 AND active:true) OR (gene_exact:P2RY12 AND organism_id:9606 AND reviewed:true))");
     });
 
     // An accession is a unique key, thus the narrowing filters must not reach
@@ -97,7 +97,19 @@ describe("searchProtein — a resolved symbol", () => {
         await callSearchProtein({ query: "P02769" });
 
         const query = sentQuery();
-        expect(query.slice(0, query.indexOf(" OR "))).toBe("(accession:P02769");
+        expect(query.slice(0, query.indexOf(" OR "))).toBe("((accession:P02769 AND active:true)");
+    });
+
+    // A deleted accession still answers an `accession:` query, as an `Inactive`
+    // row with no name and no function. `B3GAT1` is one: the gene symbol also
+    // names a deleted TrEMBL accession, thus without `active:true` the answer
+    // holds the human protein and a hollow second row.
+    it("binds active:true to the accession clause, thus a deleted accession does not answer", async () => {
+        stubResponse(200, readFixture("uniprot", "search_BRCA1_reviewed.json"));
+
+        await callSearchProtein({ query: "B3GAT1" });
+
+        expect(sentQuery()).toBe("((accession:B3GAT1 AND active:true) OR (gene_exact:B3GAT1 AND organism_id:9606 AND reviewed:true))");
     });
 
     it("recognizes the ten-character accession form", async () => {
@@ -105,7 +117,7 @@ describe("searchProtein — a resolved symbol", () => {
 
         await callSearchProtein({ query: "A0A0B4J1Y9" });
 
-        expect(sentQuery()).toContain("accession:A0A0B4J1Y9 OR");
+        expect(sentQuery()).toContain("accession:A0A0B4J1Y9 AND active:true");
     });
 
     it("drops the organism clause when organismId is null", async () => {

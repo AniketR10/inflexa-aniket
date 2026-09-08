@@ -290,6 +290,13 @@ export function isUniProtAccession(query: string): boolean {
  * overlap. Such an input searches both, and the unfiltered accession clause is
  * OR-ed with the filtered symbol clause. An input that is not
  * accession-shaped searches the symbol space alone.
+ *
+ * The accession side carries `active:true`, and that is the one filter it
+ * takes. A deleted accession still answers an `accession:` query, as an
+ * `Inactive` row with no name and no function, and `UniProtProtein` has no
+ * field for the deletion reason. `B3GAT1` is such a case: the gene symbol also
+ * names a deleted TrEMBL accession, thus without the filter the answer holds
+ * the human protein and a hollow second row.
  */
 function buildSearchQuery(query: string, organismId: number | undefined, reviewedOnly: boolean): string {
     const symbolClauses = [`gene_exact:${query}`];
@@ -298,7 +305,7 @@ function buildSearchQuery(query: string, organismId: number | undefined, reviewe
     const symbolQuery = symbolClauses.join(" AND ");
 
     if (!isUniProtAccession(query)) return symbolQuery;
-    return `(accession:${query} OR (${symbolQuery}))`;
+    return `((accession:${query} AND active:true) OR (${symbolQuery}))`;
 }
 
 export interface SearchProteinsOptions {
