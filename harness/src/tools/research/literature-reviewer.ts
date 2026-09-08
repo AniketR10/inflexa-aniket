@@ -30,6 +30,7 @@ import { createChemDbTools, createNcbiTools, type BioToolKeys } from "../bio/key
 import { genePreclinicalProfileTool } from "../bio/gene-preclinical-profile.js";
 import { lookupAnnotationTool } from "../bio/lookup-annotation.js";
 import { searchGeneTool } from "../bio/search-gene.js";
+import { searchProteinTool } from "../bio/search-protein.js";
 import { searchInteractionsTool } from "../bio/search-interactions.js";
 import type { Logger } from "../../lib/logger.js";
 import type { UsageRecorder } from "../../billing/usage-recorder.js";
@@ -63,6 +64,7 @@ export function createLiteratureReviewerTool(deps: LiteratureReviewerDeps): Tool
     const chemDb = createChemDbTools(deps.bioKeys, { ...(deps.logger ? { logger: deps.logger } : {}) });
     const reviewerTools: readonly Tool[] = [
         searchGeneTool,
+        searchProteinTool,
         lookupAnnotationTool,
         searchInteractionsTool,
         ncbi.pubmed,

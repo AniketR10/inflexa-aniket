@@ -44,6 +44,7 @@ import { composeSystemPrompt } from "./system-prompt.js";
 // Bio-lookup leaf tools (pure — no dependencies).
 import {
     searchGeneTool,
+    searchProteinTool,
     lookupAnnotationTool,
     searchInteractionsTool,
     alphafoldPredictionTool,
@@ -238,8 +239,10 @@ export function createConversationAgent(deps: ConversationAgentDeps): AgentDefin
     });
 
     const tools: Tool[] = [
-        // Identifier resolution — the ENSG most other bio tools key off.
+        // Identifier resolution — the ENSG most other bio tools key off, and the
+        // UniProt accession that the structure tools take.
         searchGeneTool,
+        searchProteinTool,
         // Functional annotation (GO / KEGG / Reactome behind one vocabulary) and
         // STRING networks + gene-set enrichment.
         lookupAnnotationTool,
