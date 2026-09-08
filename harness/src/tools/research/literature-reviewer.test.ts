@@ -57,6 +57,7 @@ describe("literatureReviewer sub-agent tool", () => {
             "resolve_citation",
             "search_gene",
             "search_interactions",
+            "search_protein",
         ]);
 
         // The child transcript is not exposed — only the report leaves the tool.

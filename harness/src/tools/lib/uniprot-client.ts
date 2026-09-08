@@ -117,3 +117,185 @@ export async function getReactomePathwaysByUniProt(accession: string): Promise<s
     const rec = await getUniProtRecord(accession);
     return rec?.reactomePathwayIds ?? [];
 }
+
+/** One protein of a UniProtKB search. */
+export interface UniProtProtein {
+    accession: string;
+    /** The UniProtKB ID, for example `BRCA1_HUMAN`. */
+    uniProtkbId: string | null;
+    proteinName: string | null;
+    geneNames: string[];
+    sequenceLength: number | null;
+    /** The curated FUNCTION comment, trimmed to a readable length. */
+    function: string | null;
+    /** The distinct curated subcellular locations, in the order UniProt lists them. */
+    subcellularLocations: string[];
+    /** True for a Swiss-Prot entry, false for a TrEMBL entry. */
+    reviewed: boolean;
+}
+
+/**
+ * The field list of the search. It is separate from `FIELDS` on purpose:
+ * `FIELDS` feeds `getUniProtRecord` and the target-assessment dossier, thus a
+ * widening of it would change what that workflow reads.
+ */
+const SEARCH_FIELDS = ["accession", "id", "protein_name", "gene_names", "length", "cc_function", "cc_subcellular_location"].join(",");
+
+/** A FUNCTION comment runs to several hundred words; this is what one answer carries. */
+const MAX_FUNCTION_CHARS = 1200;
+
+/** Swiss-Prot marks a reviewed entry in `entryType`, which reads `UniProtKB reviewed (Swiss-Prot)`. */
+const REVIEWED_ENTRY_TYPE = "reviewed";
+
+const SearchCommentSchema = z.object({
+    commentType: z.string().optional(),
+    texts: z.array(z.object({ value: z.string().optional() })).optional(),
+    subcellularLocations: z.array(z.object({ location: z.object({ value: z.string().optional() }).optional() })).optional(),
+});
+
+const ProteinNameSchema = z.object({ fullName: z.object({ value: z.string().optional() }).optional() });
+
+/**
+ * One result row of `uniprotkb/search`, with the same all-optional discipline as
+ * `UniProtRecordSchema`: UniProt omits the key of an absent value, thus every
+ * field carries `.optional()` and none carries `.nullable()`.
+ *
+ * A TrEMBL row can carry `submissionNames` in place of `recommendedName`
+ * (`X5D778` is one), thus the name reader falls back rather than reporting the
+ * protein as unnamed.
+ */
+export const UniProtSearchResultSchema = z.object({
+    primaryAccession: z.string().optional(),
+    uniProtkbId: z.string().optional(),
+    entryType: z.string().optional(),
+    proteinDescription: z
+        .object({
+            recommendedName: ProteinNameSchema.optional(),
+            submissionNames: z.array(ProteinNameSchema).optional(),
+        })
+        .optional(),
+    genes: z.array(z.object({ geneName: z.object({ value: z.string().optional() }).optional() })).optional(),
+    sequence: z.object({ length: z.number().optional() }).optional(),
+    comments: z.array(SearchCommentSchema).optional(),
+});
+
+/** The search envelope. It is exported so that the golden-fixture table drives it. */
+export const UniProtSearchResponseSchema = z.object({
+    results: z.array(UniProtSearchResultSchema).optional(),
+});
+
+type UniProtSearchResult = z.infer<typeof UniProtSearchResultSchema>;
+
+/** Read the protein name, preferring the recommended name over a submitted one. */
+function extractProteinName(raw: UniProtSearchResult): string | null {
+    const description = raw.proteinDescription;
+    const recommended = description?.recommendedName?.fullName?.value?.trim();
+    if (recommended) return recommended;
+    for (const submitted of description?.submissionNames ?? []) {
+        const value = submitted.fullName?.value?.trim();
+        if (value) return value;
+    }
+    return null;
+}
+
+/** Read the first FUNCTION comment, capped at {@link MAX_FUNCTION_CHARS}. */
+function extractFunctionText(raw: UniProtSearchResult): string | null {
+    for (const comment of raw.comments ?? []) {
+        if (comment.commentType !== "FUNCTION") continue;
+        for (const text of comment.texts ?? []) {
+            const value = text.value?.trim();
+            if (value) return value.length > MAX_FUNCTION_CHARS ? `${value.slice(0, MAX_FUNCTION_CHARS)}…` : value;
+        }
+    }
+    return null;
+}
+
+/**
+ * Read the distinct subcellular locations. UniProt splits them over more than
+ * one SUBCELLULAR LOCATION comment, and it repeats a location across them, thus
+ * the reader collects across every comment and keeps the first occurrence only.
+ */
+function extractSubcellularLocations(raw: UniProtSearchResult): string[] {
+    const locations: string[] = [];
+    const seen = new Set<string>();
+    for (const comment of raw.comments ?? []) {
+        if (comment.commentType !== "SUBCELLULAR LOCATION") continue;
+        for (const entry of comment.subcellularLocations ?? []) {
+            const value = entry.location?.value?.trim();
+            if (!value || seen.has(value)) continue;
+            seen.add(value);
+            locations.push(value);
+        }
+    }
+    return locations;
+}
+
+function toProtein(raw: UniProtSearchResult): UniProtProtein {
+    return {
+        accession: raw.primaryAccession ?? "",
+        uniProtkbId: raw.uniProtkbId ?? null,
+        proteinName: extractProteinName(raw),
+        geneNames: (raw.genes ?? []).map((gene) => gene.geneName?.value).filter((name): name is string => Boolean(name)),
+        sequenceLength: raw.sequence?.length ?? null,
+        function: extractFunctionText(raw),
+        subcellularLocations: extractSubcellularLocations(raw),
+        reviewed: (raw.entryType ?? "").toLowerCase().includes(REVIEWED_ENTRY_TYPE),
+    };
+}
+
+/**
+ * The accession forms that UniProt itself documents: the six-character form and
+ * the ten-character form, with an optional isoform suffix. A query that matches
+ * this is looked up as an accession, and every other query as a gene symbol.
+ */
+const ACCESSION_RE = /^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-\d+)?$/i;
+
+/** Does the query name a UniProt accession rather than a gene symbol? */
+export function isUniProtAccession(query: string): boolean {
+    return ACCESSION_RE.test(query.trim());
+}
+
+export interface SearchProteinsOptions {
+    /** NCBI taxonomy id; omit to search every organism. */
+    organismId?: number;
+    /** Swiss-Prot only when true (the default), Swiss-Prot and TrEMBL when false. */
+    reviewedOnly?: boolean;
+    /** Max rows returned. */
+    limit?: number;
+}
+
+export interface SearchProteinsResult {
+    proteins: UniProtProtein[];
+    /** True when UniProt held at least one row beyond `limit`. */
+    hasMore: boolean;
+}
+
+/**
+ * Search UniProtKB for a protein by gene symbol or by accession.
+ *
+ * An unknown query is HTTP 200 with `{"results":[]}`, never a 404, thus the
+ * empty result is an ordinary answer and never an error. The request asks for
+ * one row beyond `limit`, because UniProt reports its match count in the
+ * `x-total-results` header and `apiFetch` exposes no header. The extra row is
+ * what separates a trimmed answer from a complete one.
+ */
+export async function searchProteins(query: string, opts: SearchProteinsOptions = {}): Promise<SearchProteinsResult> {
+    const { organismId, reviewedOnly = true, limit = 10 } = opts;
+    const trimmed = query.trim();
+
+    const clauses = [isUniProtAccession(trimmed) ? `accession:${trimmed}` : `gene_exact:${trimmed}`];
+    if (organismId !== undefined) clauses.push(`organism_id:${organismId}`);
+    if (reviewedOnly) clauses.push("reviewed:true");
+
+    const params = new URLSearchParams({
+        query: clauses.join(" AND "),
+        fields: SEARCH_FIELDS,
+        format: "json",
+        size: String(limit + 1),
+    });
+    const res = await apiFetchValidated(`${UNIPROT_BASE}/uniprotkb/search?${params.toString()}`, UniProtSearchResponseSchema, { headers: UNIPROT_HEADERS });
+    if (res.isErr()) throw new Error(describeApiError(res.error));
+
+    const rows = res.value.results ?? [];
+    return { proteins: rows.slice(0, limit).map(toProtein), hasMore: rows.length > limit };
+}

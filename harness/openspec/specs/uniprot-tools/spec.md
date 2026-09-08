@@ -1,0 +1,149 @@
+# uniprot-tools Specification
+
+## Purpose
+
+Defines the harness tool `search_protein`, which wraps the UniProtKB search
+endpoint (`https://rest.uniprot.org/uniprotkb/search`). UniProtKB is the curated
+protein knowledgebase of EMBL-EBI, SIB, and PIR. It is keyless and public.
+
+`harness/src/tools/lib/uniprot-client.ts` held `getUniProtRecord` before this
+tool, but only the target-assessment workflow imported it. Thus no agent could
+look up a protein. `search_gene` accepts a UniProt accession, but it answers
+with Ensembl gene records only. This tool answers with the protein itself: the
+name, the gene names, the sequence length, the curated function, and the
+subcellular locations.
+
+The tool follows the harness tool-error contract literally. The search endpoint
+answers an unknown query with HTTP 200 and `{"results":[]}`, and never with a
+404. Thus the empty answer is `ok({ proteins: [] })` and it needs no
+status-code branch. An unexpected failure throws out of `execute` — a 5xx, a
+timeout, retry exhaustion, or a schema mismatch. The agent loop then wraps it
+as a `tool_result { is_error: true }`.
+
+Three decisions bind the tool. First, the search takes its own field list.
+`FIELDS` feeds `getUniProtRecord` and the target-assessment dossier, thus a
+widening of it would change what that workflow reads.
+
+Second, the query shape comes from the input. An input that matches a
+documented UniProt accession form is looked up as `accession:`, and every other
+input as `gene_exact:`. Thus one input field serves both identifier spaces, and
+a caller never states which one it holds.
+
+Third, the answer is bounded and it says so. UniProt reports its match count in
+the `x-total-results` header, and `apiFetch` exposes no header. Thus the client
+asks for one row beyond the limit and reports `hasMore`. That separates a
+trimmed answer from a complete one, which is what the bio barrel requires.
+
+## Requirements
+
+### Requirement: UniProtKB protein search tool
+
+The system MUST give a `searchProteinTool` (on-wire id `search_protein`, built
+with `defineTool`) that takes a required `query` string. It MUST also take
+`organismId` (an NCBI Taxonomy ID, default 9606, nullable to search every
+organism), `reviewedOnly` (default true), and `limit`. It MUST return
+`ok({ proteins, hasMore })`. Each protein carries `accession`, `uniProtkbId`,
+`proteinName`, `geneNames`, `sequenceLength`, `function`,
+`subcellularLocations`, and `reviewed`.
+
+#### Scenario: A gene symbol resolves to its reviewed protein
+
+- **WHEN** the tool is called with `query: "BRCA1"` and the default organism and reviewed filter
+- **THEN** it returns one protein whose `accession` is `P38398` and whose `uniProtkbId` is `BRCA1_HUMAN`
+
+#### Scenario: An accession is looked up as an accession
+
+- **WHEN** the `query` matches a documented UniProt accession form, for example `P38398` or `A0A0B4J1Y9`
+- **THEN** the request carries an `accession:` clause, and not a `gene_exact:` clause
+
+#### Scenario: A symbol is looked up as a gene symbol
+
+- **WHEN** the `query` matches no accession form, for example `BRCA1`
+- **THEN** the request carries a `gene_exact:` clause
+
+#### Scenario: An unknown query returns an empty array
+
+- **WHEN** UniProt answers HTTP 200 with `{"results":[]}`
+- **THEN** the tool returns `ok({ proteins: [], hasMore: false })`, and not an `is_error` tool result
+
+#### Scenario: The reviewed filter is a toggle
+
+- **WHEN** `reviewedOnly` is false
+- **THEN** the request carries no `reviewed:true` clause, thus a TrEMBL entry can answer
+
+#### Scenario: Every organism is reachable
+
+- **WHEN** `organismId` is null
+- **THEN** the request carries no `organism_id:` clause
+
+#### Scenario: A trimmed answer says that it was trimmed
+
+- **WHEN** UniProt holds more rows than `limit`
+- **THEN** the tool returns `limit` proteins and `hasMore: true`
+
+#### Scenario: A server error surfaces as an error tool result
+
+- **WHEN** UniProt returns a 5xx after retries are exhausted
+- **THEN** `execute` throws, and the agent loop records the call as `tool_result { is_error: true }`
+
+### Requirement: describeCall names the query
+
+The tool MUST declare a `describeCall` hook that returns the `query` verbatim.
+Thus a caller tells one call from another by the query alone.
+
+#### Scenario: describeCall reports the query
+
+- **WHEN** `describeCall` is invoked with `{ query: "BRCA1" }`
+- **THEN** it returns the string `"BRCA1"`
+
+### Requirement: The search client obeys the absence policy of UniProt
+
+`searchProteins` MUST live in `harness/src/tools/lib/uniprot-client.ts`, beside
+`getUniProtRecord`. It MUST take its own field list, and it MUST NOT widen the
+`FIELDS` constant. Each field of the search schema MUST carry `.optional()`,
+because UniProt omits the key of an absent value and never sends null. The
+schema MUST be exported, so that the golden-fixture table drives it.
+
+#### Scenario: An entry that omits the optional keys still maps
+
+- **WHEN** a result row omits `genes` and `comments`, as `Q6ZQY7` does
+- **THEN** the mapped protein carries empty `geneNames`, a null `function`, and empty `subcellularLocations`
+
+#### Scenario: A submitted name stands in for a recommended name
+
+- **WHEN** a TrEMBL row carries `submissionNames` and no `recommendedName`, as `X5D778` does
+- **THEN** `proteinName` reads the submitted name, and it is not null
+
+#### Scenario: A repeated location is kept once
+
+- **WHEN** UniProt splits the subcellular locations over more than one comment and repeats one of them
+- **THEN** `subcellularLocations` holds each distinct location one time, in the order UniProt lists them
+
+### Requirement: search_protein reaches the conversation agent and the literature reviewer
+
+The tool MUST be wired into the conversation agent
+(`harness/src/agents/conversation-agent.ts`) and into the literature reviewer
+(`harness/src/tools/research/literature-reviewer.ts`). The prompt of the
+literature reviewer names each tool that it holds, thus
+`harness/src/prompts/literature-reviewer.ts` MUST carry a usage note for this
+one.
+
+The tool MUST NOT be an entry in the sandbox tool registry, and
+`SandboxToolName` (`harness/src/agents/sandbox/types.ts`) MUST NOT name it.
+Identifier resolution answers a question of the conversation, thus no sandbox
+agent reaches for one yet.
+
+#### Scenario: Conversation agent has the tool
+
+- **WHEN** the conversation agent is created
+- **THEN** its tool array includes `searchProteinTool`
+
+#### Scenario: The literature reviewer has the tool and its prompt says so
+
+- **WHEN** the literature reviewer tool is built
+- **THEN** its tool array includes `searchProteinTool`, and its prompt names `search_protein` in the tool usage notes
+
+#### Scenario: No sandbox agent can declare the tool
+
+- **WHEN** a sandbox-agent meta names the tool in `meta.tools`
+- **THEN** the name is not a `SandboxToolName`, thus the typecheck rejects it
