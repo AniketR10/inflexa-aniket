@@ -66,12 +66,38 @@ describe("searchProtein — a resolved symbol", () => {
         expect(sentQuery()).toBe("gene_exact:BRCA1 AND organism_id:9606 AND reviewed:true");
     });
 
-    it("queries accession for an input shaped like one", async () => {
+    // A symbol that is not accession-shaped must never reach an `accession:`
+    // clause, because UniProt validates that value and answers HTTP 400 for one
+    // it cannot parse, which fails the whole request.
+    it("sends no accession clause for an input that is not accession-shaped", async () => {
         stubResponse(200, readFixture("uniprot", "search_BRCA1_reviewed.json"));
 
-        await callSearchProtein({ query: "P38398" });
+        await callSearchProtein({ query: "BRCA1" });
 
-        expect(sentQuery()).toBe("accession:P38398 AND organism_id:9606 AND reviewed:true");
+        expect(sentQuery()).not.toContain("accession:");
+    });
+
+    // The two identifier spaces overlap: `P2RY12` is a real gene symbol AND it
+    // matches the six-character accession form. Searching the accession space
+    // alone reports the target of clopidogrel as absent.
+    it("searches both spaces for an accession-shaped input", async () => {
+        stubResponse(200, readFixture("uniprot", "search_BRCA1_reviewed.json"));
+
+        await callSearchProtein({ query: "P2RY12" });
+
+        expect(sentQuery()).toBe("(accession:P2RY12 OR (gene_exact:P2RY12 AND organism_id:9606 AND reviewed:true))");
+    });
+
+    // An accession is a unique key, thus the narrowing filters must not reach
+    // it. `accession:P02769 AND organism_id:9606` answers nothing, although the
+    // accession names bovine serum albumin.
+    it("keeps the organism and reviewed filters off the accession clause", async () => {
+        stubResponse(200, readFixture("uniprot", "search_BRCA1_reviewed.json"));
+
+        await callSearchProtein({ query: "P02769" });
+
+        const query = sentQuery();
+        expect(query.slice(0, query.indexOf(" OR "))).toBe("(accession:P02769");
     });
 
     it("recognizes the ten-character accession form", async () => {
@@ -79,7 +105,7 @@ describe("searchProtein — a resolved symbol", () => {
 
         await callSearchProtein({ query: "A0A0B4J1Y9" });
 
-        expect(sentQuery()).toContain("accession:A0A0B4J1Y9");
+        expect(sentQuery()).toContain("accession:A0A0B4J1Y9 OR");
     });
 
     it("drops the organism clause when organismId is null", async () => {
@@ -96,6 +122,29 @@ describe("searchProtein — a resolved symbol", () => {
         await callSearchProtein({ query: "BRCA1", reviewedOnly: false });
 
         expect(sentQuery()).toBe("gene_exact:BRCA1 AND organism_id:9606");
+    });
+});
+
+describe("searchProtein — a TrEMBL entry", () => {
+    // `UniProtKB unreviewed (TrEMBL)` HOLDS the word `reviewed`, thus a
+    // substring test for it reports every uncurated entry as curated.
+    it("reports reviewed false, and reads the name from submissionNames", async () => {
+        stubResponse(200, readFixture("uniprot", "search_X5D778_trembl.json"));
+
+        const out = await callSearchProtein({ query: "X5D778", reviewedOnly: false });
+
+        const protein = out.proteins[0]!;
+        expect(protein.accession).toBe("X5D778");
+        expect(protein.reviewed).toBe(false);
+        expect(protein.proteinName).toBe("Ankyrin repeat domain 11 isoform A");
+    });
+
+    it("reports reviewed true for a Swiss-Prot entry", async () => {
+        stubResponse(200, readFixture("uniprot", "search_BRCA1_reviewed.json"));
+
+        const out = await callSearchProtein({ query: "BRCA1" });
+
+        expect(out.proteins[0]!.reviewed).toBe(true);
     });
 });
 

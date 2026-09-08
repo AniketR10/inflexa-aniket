@@ -1,0 +1,47 @@
+{
+    "results": [
+        {
+            "entryType": "UniProtKB unreviewed (TrEMBL)",
+            "primaryAccession": "X5D778",
+            "uniProtkbId": "X5D778_HUMAN",
+            "proteinDescription": {
+                "submissionNames": [
+                    {
+                        "fullName": {
+                            "evidences": [
+                                {
+                                    "evidenceCode": "ECO:0000313",
+                                    "source": "EMBL",
+                                    "id": "AHW56410.1"
+                                }
+                            ],
+                            "value": "Ankyrin repeat domain 11 isoform A"
+                        }
+                    }
+                ],
+                "flag": "Fragment"
+            },
+            "genes": [
+                {
+                    "geneName": {
+                        "evidences": [
+                            {
+                                "evidenceCode": "ECO:0000313",
+                                "source": "EMBL",
+                                "id": "AHW56410.1"
+                            }
+                        ],
+                        "value": "ANKRD11"
+                    }
+                }
+            ],
+            "comments": [],
+            "sequence": {
+                "length": 421
+            },
+            "extraAttributes": {
+                "uniParcId": "UPI0004437BC2"
+            }
+        }
+    ]
+}

@@ -24,10 +24,18 @@ Three decisions bind the tool. First, the search takes its own field list.
 `FIELDS` feeds `getUniProtRecord` and the target-assessment dossier, thus a
 widening of it would change what that workflow reads.
 
-Second, the query shape comes from the input. An input that matches a
-documented UniProt accession form is looked up as `accession:`, and every other
-input as `gene_exact:`. Thus one input field serves both identifier spaces, and
-a caller never states which one it holds.
+Second, the two identifier spaces overlap, thus the query searches both. A
+gene symbol such as `P2RY12` or `B3GAT1` matches the accession form exactly. A
+lookup in the accession space alone reports that protein as absent. Thus an
+accession-shaped input searches both spaces.
+
+The shape still decides one thing. UniProt validates the value of an
+`accession:` clause, and it answers HTTP 400 for a value that is not
+accession-shaped. Thus a plain symbol never reaches that clause.
+
+The narrowing filters stay off the accession side. An accession is a unique
+key, and `accession:P02769` under the human default would otherwise answer
+nothing, although that accession names bovine serum albumin.
 
 Third, the answer is bounded and it says so. UniProt reports its match count in
 the `x-total-results` header, and `apiFetch` exposes no header. Thus the client
@@ -51,15 +59,20 @@ organism), `reviewedOnly` (default true), and `limit`. It MUST return
 - **WHEN** the tool is called with `query: "BRCA1"` and the default organism and reviewed filter
 - **THEN** it returns one protein whose `accession` is `P38398` and whose `uniProtkbId` is `BRCA1_HUMAN`
 
-#### Scenario: An accession is looked up as an accession
+#### Scenario: An accession-shaped input searches both identifier spaces
 
-- **WHEN** the `query` matches a documented UniProt accession form, for example `P38398` or `A0A0B4J1Y9`
-- **THEN** the request carries an `accession:` clause, and not a `gene_exact:` clause
+- **WHEN** the `query` matches a documented UniProt accession form, for example `P38398`, `A0A0B4J1Y9`, or the gene symbol `P2RY12`
+- **THEN** the request OR-s an `accession:` clause with the `gene_exact:` clause, thus a symbol that is shaped like an accession still resolves
 
-#### Scenario: A symbol is looked up as a gene symbol
+#### Scenario: The narrowing filters stay off the accession clause
+
+- **WHEN** the `query` is an accession that names an entry of another organism, for example `P02769` under the default `organismId` of 9606
+- **THEN** the `organism_id:` and `reviewed:true` clauses bind the `gene_exact:` side only, and the accession still resolves
+
+#### Scenario: A symbol that is not accession-shaped sends no accession clause
 
 - **WHEN** the `query` matches no accession form, for example `BRCA1`
-- **THEN** the request carries a `gene_exact:` clause
+- **THEN** the request carries a `gene_exact:` clause and no `accession:` clause, because UniProt answers HTTP 400 for an accession value it cannot parse
 
 #### Scenario: An unknown query returns an empty array
 
@@ -113,6 +126,16 @@ schema MUST be exported, so that the golden-fixture table drives it.
 
 - **WHEN** a TrEMBL row carries `submissionNames` and no `recommendedName`, as `X5D778` does
 - **THEN** `proteinName` reads the submitted name, and it is not null
+
+#### Scenario: A TrEMBL row reports reviewed false
+
+- **WHEN** `entryType` reads `UniProtKB unreviewed (TrEMBL)`
+- **THEN** `reviewed` is false, because the client matches `unreviewed` before it matches `reviewed`
+
+#### Scenario: A Swiss-Prot row reports reviewed true
+
+- **WHEN** `entryType` reads `UniProtKB reviewed (Swiss-Prot)`
+- **THEN** `reviewed` is true
 
 #### Scenario: A repeated location is kept once
 
