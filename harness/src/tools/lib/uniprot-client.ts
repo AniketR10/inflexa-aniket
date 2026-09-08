@@ -144,8 +144,21 @@ const SEARCH_FIELDS = ["accession", "id", "protein_name", "gene_names", "length"
 /** A FUNCTION comment runs to several hundred words; this is what one answer carries. */
 const MAX_FUNCTION_CHARS = 1200;
 
-/** Swiss-Prot marks a reviewed entry in `entryType`, which reads `UniProtKB reviewed (Swiss-Prot)`. */
+/**
+ * `entryType` reads `UniProtKB reviewed (Swiss-Prot)` or
+ * `UniProtKB unreviewed (TrEMBL)`. The unreviewed value HOLDS the reviewed one
+ * as a substring, thus the negative test must run first. A test for `reviewed`
+ * alone answers true for every entry of either kind.
+ */
 const REVIEWED_ENTRY_TYPE = "reviewed";
+const UNREVIEWED_ENTRY_TYPE = "unreviewed";
+
+/** Is the entry a curated Swiss-Prot record, as opposed to a machine-annotated TrEMBL one? */
+function isReviewedEntry(entryType: string | undefined): boolean {
+    const value = (entryType ?? "").toLowerCase();
+    if (value.includes(UNREVIEWED_ENTRY_TYPE)) return false;
+    return value.includes(REVIEWED_ENTRY_TYPE);
+}
 
 const SearchCommentSchema = z.object({
     commentType: z.string().optional(),
@@ -239,20 +252,53 @@ function toProtein(raw: UniProtSearchResult): UniProtProtein {
         sequenceLength: raw.sequence?.length ?? null,
         function: extractFunctionText(raw),
         subcellularLocations: extractSubcellularLocations(raw),
-        reviewed: (raw.entryType ?? "").toLowerCase().includes(REVIEWED_ENTRY_TYPE),
+        reviewed: isReviewedEntry(raw.entryType),
     };
 }
 
 /**
  * The accession forms that UniProt itself documents: the six-character form and
- * the ten-character form, with an optional isoform suffix. A query that matches
- * this is looked up as an accession, and every other query as a gene symbol.
+ * the ten-character form, with an optional isoform suffix.
+ *
+ * The shape does NOT tell an accession from a gene symbol, because the two
+ * spaces overlap: `P2RY12`, `B3GAT1`, and their siblings are real gene symbols
+ * that match this form. Thus the match decides only whether the `accession:`
+ * clause is SAFE to send, never which space the query names.
  */
 const ACCESSION_RE = /^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})(?:-\d+)?$/i;
 
-/** Does the query name a UniProt accession rather than a gene symbol? */
+/**
+ * Can the query ride in an `accession:` clause?
+ *
+ * UniProt validates the value of that clause, and it answers HTTP 400 for a
+ * value that is not accession-shaped. Thus a plain symbol such as `BRCA1` must
+ * never reach one, because the 400 fails the whole request.
+ */
 export function isUniProtAccession(query: string): boolean {
     return ACCESSION_RE.test(query.trim());
+}
+
+/**
+ * Build the UniProtKB query.
+ *
+ * The organism filter and the reviewed filter narrow an ambiguous SYMBOL
+ * search. An accession is a unique key, thus the filters must not reach it: a
+ * lookup of `P02769` under the human default would otherwise answer nothing,
+ * although the accession names bovine serum albumin.
+ *
+ * An accession-shaped input is ambiguous, because the two identifier spaces
+ * overlap. Such an input searches both, and the unfiltered accession clause is
+ * OR-ed with the filtered symbol clause. An input that is not
+ * accession-shaped searches the symbol space alone.
+ */
+function buildSearchQuery(query: string, organismId: number | undefined, reviewedOnly: boolean): string {
+    const symbolClauses = [`gene_exact:${query}`];
+    if (organismId !== undefined) symbolClauses.push(`organism_id:${organismId}`);
+    if (reviewedOnly) symbolClauses.push("reviewed:true");
+    const symbolQuery = symbolClauses.join(" AND ");
+
+    if (!isUniProtAccession(query)) return symbolQuery;
+    return `(accession:${query} OR (${symbolQuery}))`;
 }
 
 export interface SearchProteinsOptions {
@@ -283,12 +329,8 @@ export async function searchProteins(query: string, opts: SearchProteinsOptions 
     const { organismId, reviewedOnly = true, limit = 10 } = opts;
     const trimmed = query.trim();
 
-    const clauses = [isUniProtAccession(trimmed) ? `accession:${trimmed}` : `gene_exact:${trimmed}`];
-    if (organismId !== undefined) clauses.push(`organism_id:${organismId}`);
-    if (reviewedOnly) clauses.push("reviewed:true");
-
     const params = new URLSearchParams({
-        query: clauses.join(" AND "),
+        query: buildSearchQuery(trimmed, organismId, reviewedOnly),
         fields: SEARCH_FIELDS,
         format: "json",
         size: String(limit + 1),

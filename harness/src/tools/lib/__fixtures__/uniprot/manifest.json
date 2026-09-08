@@ -33,6 +33,19 @@
         },
         "capturedAt": "2026-09-08"
     },
+    "search_X5D778_trembl.json": {
+        "url": "https://rest.uniprot.org/uniprotkb/search",
+        "params": {
+            "query": "accession:X5D778",
+            "fields": "accession,id,protein_name,gene_names,length,cc_function,cc_subcellular_location",
+            "format": "json",
+            "size": "2"
+        },
+        "headers": {
+            "Accept": "application/json"
+        },
+        "capturedAt": "2026-09-08"
+    },
     "uniprotkb_openapi.json": {
         "url": "https://rest.uniprot.org/uniprotkb/api/docs",
         "capturedAt": "2026-08-28",

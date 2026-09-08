@@ -28,15 +28,17 @@ export const searchProteinTool = defineTool({
     description:
         "UniProtKB — the curated protein knowledgebase of EMBL-EBI, SIB and PIR. Resolves a protein and answers with its accession, its UniProtKB ID " +
         "('BRCA1_HUMAN'), its recommended name, its gene names, its sequence length, its curated FUNCTION summary, and its subcellular locations.\n" +
-        "ACCEPTED IDENTIFIERS: a HUGO gene symbol ('BRCA1'), matched exactly, or a UniProt accession ('P38398', 'A0A0B4J1Y9'), which is detected by its " +
-        "shape and looked up directly. A protein NAME is not accepted — resolve the symbol first.\n" +
+        "ACCEPTED IDENTIFIERS: a HUGO gene symbol ('BRCA1'), matched exactly, or a UniProt accession ('P38398', 'A0A0B4J1Y9'). The two spaces overlap — " +
+        "'P2RY12' is both a real symbol and a valid accession shape — so an accession-shaped input searches BOTH, and either kind resolves. A protein " +
+        "NAME is not accepted; resolve the symbol first.\n" +
         "This is the tool that produces a UniProt accession, which is the key that the structure tools take. Prefer it over search_gene when the " +
         "question is about the PROTEIN — what it does, how long it is, where it acts — and search_gene when the question is about the gene locus, its " +
         "coordinates or its Ensembl ID.\n" +
         "`reviewedOnly` defaults to true, thus an answer holds Swiss-Prot entries only: manually curated, one entry per gene, and the right default for " +
         "a human question. Set it false to reach TrEMBL as well, which is machine-annotated and holds many isoform-level rows per gene — needed for a " +
         "protein that Swiss-Prot has not curated.\n" +
-        "`organismId` takes an NCBI Taxonomy ID and defaults to 9606 (human); pass 10090 for mouse, or null to search every organism.\n" +
+        "`organismId` takes an NCBI Taxonomy ID and defaults to 9606 (human); pass 10090 for mouse, or null to search every organism. Both this and " +
+        "`reviewedOnly` narrow a SYMBOL match only — an accession is a unique key, so it resolves whatever its organism or review status.\n" +
         "An empty `proteins` array is valid no-data (an unrecognized symbol, or one this organism has no entry for) — report it and continue, do not " +
         "retry the same call. `hasMore` true means the answer was trimmed to `limit`.",
     inputSchema: z.object({
