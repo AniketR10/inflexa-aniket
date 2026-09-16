@@ -563,7 +563,12 @@ export type RequestResolutionError =
           readonly type: "ambiguous_ecosystem";
           /** The identity key of each track that holds the spelling: Python first, then R. */
           readonly identities: readonly [string, string];
-          /** The head store directory of each track that holds the spelling: Python first, then R. */
+          /**
+           * What claims each track of the spelling, Python first, then R: the
+           * head store directory of the pool, or the runtime of the image for a
+           * base package that the pool does not hold. A caller renders these
+           * two, thus each side reads as the thing that holds the name.
+           */
           readonly candidates: readonly [string, string];
       };
 
@@ -1656,6 +1661,13 @@ function absentOutcome(query: PackageQuery, failure: RequestResolutionError): Pa
     }
 }
 
+/** What claims one track of a spelling: a store directory of the pool, or the runtime of the image. */
+function claimOf(graph: DepsGraph, record: ImagePackages, image: PoolIndex, identity: PackageIdentity): string | undefined {
+    const head = graph.byName[identity.track].get(identity.name)?.[0];
+    if (head !== undefined) return head;
+    return image.has(identity) ? `the ${identity.track} runtime of the image (${record.runtimes[identity.track]})` : undefined;
+}
+
 /** The answer of the seam route for one query: a store directory of the pool, or a package of the image. */
 type LinkResolution =
     | { readonly kind: "pool"; readonly answer: ResolvedRequest }
@@ -1683,14 +1695,44 @@ function readStoreImageRecord(storeRoot: string): ImagePackages | undefined {
  */
 function resolveLinkRequest(graph: DepsGraph, record: ImagePackages | undefined, query: PackageQuery): LinkResolution {
     const pool = poolIndexOf(graph);
-    const resolution = resolveQuery(query, record === undefined ? pool : joinPoolIndexes(pool, imagePoolIndex(record)));
-    if (record !== undefined && resolution.kind === "resolved" && !pool.has(resolution.identity)) {
-        return { kind: "image", version: record.runtimes[resolution.identity.track] };
+    const graphAnswer = (resolution: QueryResolution): LinkResolution =>
+        answerResolution(graph, query, resolution).match(
+            (answer): LinkResolution => ({ kind: "pool", answer }),
+            (failure): LinkResolution => ({ kind: "refused", failure }),
+        );
+    if (record === undefined) return graphAnswer(resolveQuery(query, pool));
+
+    const image = imagePoolIndex(record);
+    const resolution = resolveQuery(query, joinPoolIndexes(pool, image));
+    if (resolution.kind === "resolved" && !pool.has(resolution.identity)) {
+        // The image holds one version of a base package: the version of its own
+        // runtime. Thus a pin of a different version refuses, the same as a pin
+        // that the pool does not hold.
+        const version = record.runtimes[resolution.identity.track];
+        if (query.version !== undefined && query.version !== version) {
+            return { kind: "refused", failure: { type: "unknown_version", version: query.version, available: [version] } };
+        }
+        return { kind: "image", version };
     }
-    return answerResolution(graph, query, resolution).match(
-        (answer): LinkResolution => ({ kind: "pool", answer }),
-        (failure): LinkResolution => ({ kind: "refused", failure }),
-    );
+    if (resolution.kind === "ambiguous") {
+        // One side of the ambiguity can be a base package of the image, and its
+        // track holds no store directory. `answerResolution` reads the two
+        // shelves of the graph alone, thus it would report the pair as unknown
+        // and lose the one remedy that a caller can act on: name the track.
+        const python = claimOf(graph, record, image, resolution.python);
+        const r = claimOf(graph, record, image, resolution.r);
+        if (python !== undefined && r !== undefined) {
+            return {
+                kind: "refused",
+                failure: {
+                    type: "ambiguous_ecosystem",
+                    identities: [identityKey(resolution.python), identityKey(resolution.r)],
+                    candidates: [python, r],
+                },
+            };
+        }
+    }
+    return graphAnswer(resolution);
 }
 
 /**

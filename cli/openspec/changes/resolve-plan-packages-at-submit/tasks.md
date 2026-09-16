@@ -4,9 +4,13 @@
 - [x] 1.2 In the same file, make `linkPackagesIntoFarm` read the image record of the store. Join `imagePoolIndex` to the graph index, and resolve each query one time.
 - [x] 1.3 In the same file, answer `present` with the runtime version for an identity that only the image holds. Link nothing for it.
 
+- [x] 1.4 In the same file, refuse a pin of a version that the runtime of the image does not hold.
+- [x] 1.5 In the same file, answer an `ambiguous` pair of the joined index with a collision. Name the runtime of the image as the claim of an image track.
+
 ## 2. The tests
 
 - [x] 2.1 In `src/modules/libs/composition.test.ts`, add the three scenarios: a base R package is present, a standard-library module is present, and a store with no record keeps the answer of the graph.
+- [x] 2.2 In the same file, add the two scenarios of the review: a pin of a version that the runtime does not hold refuses, and a two-source ambiguity reports a collision with both prefixed forms.
 
 ## 3. Verification
 

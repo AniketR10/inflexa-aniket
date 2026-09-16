@@ -1042,7 +1042,7 @@ describe("linkPackagesIntoFarm", () => {
 
 describe("linkPackagesIntoFarm — the base sets of the image", () => {
     /** Write an image record at the root of a store, with the base sets of the two runtimes. */
-    function writeImageRecord(root: string): void {
+    function writeImageRecord(root: string, rBase: string[] = ["grid", "stats"]): void {
         writeFileSync(
             join(root, "image-packages.json"),
             JSON.stringify({
@@ -1051,7 +1051,7 @@ describe("linkPackagesIntoFarm — the base sets of the image", () => {
                 runtimes: { python: "3.12.3", r: "4.6.0", node: "24.8.0" },
                 system_tools: [],
                 node: [],
-                r_base: ["grid", "stats"],
+                r_base: rBase,
                 python_stdlib: ["json", "pickle"],
             }),
         );
@@ -1078,6 +1078,36 @@ describe("linkPackagesIntoFarm — the base sets of the image", () => {
             { kind: "present", spelling: "json", version: "3.12.3" },
             { kind: "linked", spelling: "beta", version: "0.4.1" },
         ]);
+    });
+
+    test("a pin of a version that the runtime does not hold refuses, as a pool pin does", async () => {
+        const root = tempStore();
+        writeImageRecord(root);
+
+        const refused = await linkPackagesIntoFarm(root, randomUUIDv7(), [{ spelling: "stats", track: "r", version: "3.0.0" }]);
+        const pinned = await linkPackagesIntoFarm(root, randomUUIDv7(), [{ spelling: "stats", track: "r", version: "4.6.0" }]);
+
+        expect(refused).toEqual([{ kind: "absent", spelling: "stats", acquisitionPossible: true }]);
+        expect(pinned).toEqual([{ kind: "present", spelling: "stats", version: "4.6.0" }]);
+    });
+
+    // The remedy of a two-track spelling is the prefix, and it holds when one
+    // side is a base package of the image. The image track carries no store
+    // directory, thus a reader of the two graph shelves alone would report the
+    // pair as absent and lose that remedy.
+    test("a spelling that the pool and the image hold in two tracks reports a collision with both prefixed forms", async () => {
+        const root = tempStore();
+        writeImageRecord(root, ["beta"]);
+
+        const outcomes = await linkPackagesIntoFarm(root, randomUUIDv7(), [{ spelling: "beta" }]);
+
+        expect(outcomes).toHaveLength(1);
+        expect(outcomes[0]).toMatchObject({ kind: "collision", spelling: "beta" });
+        if (outcomes[0]?.kind !== "collision") return;
+        expect(outcomes[0].storeDirs[0]).toBe(BETA);
+        expect(outcomes[0].storeDirs[1]).toContain("the r runtime of the image (4.6.0)");
+        expect(outcomes[0].detail).toContain("python:beta");
+        expect(outcomes[0].detail).toContain("r:beta");
     });
 
     test("a store with no image record keeps the answer of the graph", async () => {

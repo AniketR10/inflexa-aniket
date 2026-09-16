@@ -34,6 +34,18 @@ The farm links a store directory, and the image package has none. The runtime
 of the image already loads it. Thus the outcome is `present`, and its version
 is the runtime version of the track in the record.
 
+### The image answers a version and an ambiguity by the rules of the pool
+
+The image holds one version of a base package, which is the version of its
+runtime. A pin of another version refuses with `unknown_version`, thus a pinned
+entry reads alike on the two paths.
+
+An `ambiguous` answer can name one track of the pool and one track of the
+image. The image track holds no store directory, thus the shared switch over
+the graph shelves cannot answer it. The seam route builds that refusal itself,
+and the claim of the image track names the runtime of the image. The remedy of
+the refusal stays the prefix.
+
 ### A missing record gives an empty image index
 
 A store from before the record, or a record that does not parse, gives an index
