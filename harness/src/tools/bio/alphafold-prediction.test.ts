@@ -113,10 +113,27 @@ describe("alphafoldPrediction — an upstream failure", () => {
         const { ctx } = makeToolContext();
         await expect(alphafoldPredictionTool.execute({ uniprotAccession: "P38398" }, ctx)).rejects.toThrow();
     });
+
+    it("throws on a 403, because a refusal is not an absence", async () => {
+        stubResponse(403, "<!doctype html><title>403</title>403 Forbidden");
+
+        const { ctx } = makeToolContext();
+        await expect(alphafoldPredictionTool.execute({ uniprotAccession: "P38398" }, ctx)).rejects.toThrow("HTTP 403");
+    });
 });
 
 describe("alphafoldPrediction — describeCall", () => {
     it("names the queried accession", () => {
         expect(alphafoldPredictionTool.describeCall!({ uniprotAccession: "P38398" })).toBe("P38398");
+    });
+});
+
+describe("alphafold_prediction — the display path", () => {
+    // The description is the whole of what the agent knows about the tool. Without the pointer it
+    // reaches for a sandbox download to show a structure, which lands a binary the chat cannot render.
+    it("names show_user(kind: structure) as the way to show the model, and keeps files out of the conversation", () => {
+        expect(alphafoldPredictionTool.description).toContain("show_user");
+        expect(alphafoldPredictionTool.description).toContain('kind: "structure"');
+        expect(alphafoldPredictionTool.description).toContain("do not expect the file contents here");
     });
 });
