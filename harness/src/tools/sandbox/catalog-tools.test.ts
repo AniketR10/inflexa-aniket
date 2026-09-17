@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { makeToolContext } from "../__fixtures__/tool-context.js";
 import {
     createListAvailablePackagesTool,
-    inventoryPoolIndex,
+    answerPackagesQuery,
     lockSections,
     queryPackages,
     readInventorySections,
@@ -15,8 +15,8 @@ import {
     type Section,
 } from "./list-available-packages.js";
 import type { FarmLock } from "../../sandbox/farm.js";
-import { ImagePackagesSchema } from "../../sandbox/image-packages.js";
-import { pythonIdentity, rIdentity, resolveQuery } from "../../sandbox/package-identity.js";
+import { resolvePackage } from "../../sandbox/image-packages.js";
+import { pythonIdentity, rIdentity } from "../../sandbox/package-identity.js";
 
 // The shape every source is normalized into before `queryPackages` sees it:
 // one section per language track, each holding the canonical package names.
@@ -581,53 +581,38 @@ describe("list_available_packages — reading the inventory", () => {
         expect(unreadable.kind === "unavailable" ? unreadable.reason : undefined).toContain("the dependency graph names 1 edge(s)");
     });
 
-    // The planner builds its submit index from this record, thus the read
-    // carries the record it merged, and nothing when it merged none.
-    it("the inventory read carries the valid record it merged", async () => {
-        const withRecord = await makeStore(JSON.stringify({ ...IMAGE_RECORD, r_base: ["stats"] }));
-        const withoutRecord = await makeStore();
+    // The planner resolves its submit over the sources of this read, thus the
+    // read carries the tracked rows and the base sets of the record it merged.
+    it("the inventory read carries its scope and the sources of its sections and its record", async () => {
+        const { farmLockFile, imagePackagesFile } = await makeStore(JSON.stringify({ ...IMAGE_RECORD, r_base: ["stats"], python_stdlib: ["json"] }));
 
-        const read = await readInventorySections(withRecord);
-        const bare = await readInventorySections(withoutRecord);
+        const pool = await readInventorySections({
+            farmLockFile,
+            imagePackagesFile,
+            readPoolInventory: async () =>
+                ({
+                    kind: "sections",
+                    sections: [{ title: "Python (pip)", track: "python", packages: [{ name: "scikit-learn" }] }],
+                }) as const,
+        });
+        const farm = await readInventorySections({ farmLockFile, imagePackagesFile });
 
-        expect(read.kind === "sections" ? read.record?.r_base : undefined).toEqual(["stats"]);
-        expect(bare.kind === "sections" ? bare.record : "unavailable").toBeUndefined();
-    });
-});
-
-describe("inventoryPoolIndex — the submit index of one census", () => {
-    const RECORD = ImagePackagesSchema.parse({
-        schema: 1,
-        image: { repository: "ghcr.io/inflexa-ai/sandbox-base", version: "20260901-3031713", arch: "amd64" },
-        runtimes: { python: "3.12.3", r: "4.6.0", node: "24.8.0" },
-        system_tools: [{ name: "samtools", version: "1.22.1" }],
-        node: [{ name: "echarts", version: "6.0.0" }],
-        r_base: ["stats"],
-        python_stdlib: ["json"],
-    });
-
-    it("resolves a row of a tracked section", () => {
-        const pool = inventoryPoolIndex(SECTIONS, RECORD);
-
-        expect(resolveQuery({ spelling: "scikit_learn" }, pool)).toEqual({ kind: "resolved", identity: pythonIdentity("scikit-learn") });
-        expect(resolveQuery({ spelling: "seurat" }, pool)).toEqual({ kind: "unknown", suggestion: rIdentity("Seurat") });
+        expect(pool.scope).toBe("pool");
+        expect(farm.scope).toBe("farm");
+        if (pool.kind !== "sections") throw new Error("expected sections");
+        expect(resolvePackage({ spelling: "scikit_learn" }, pool.sources)).toEqual({ kind: "pool", identity: pythonIdentity("scikit-learn") });
+        expect(resolvePackage({ spelling: "stats", track: "r" }, pool.sources)).toMatchObject({ kind: "image", identity: rIdentity("stats") });
+        // A system tool of the record is not a package of a track, thus a plan
+        // entry of its name resolves nothing.
+        expect(resolvePackage({ spelling: "samtools" }, pool.sources)).toEqual({ kind: "unknown" });
     });
 
-    it("resolves a base name of the record", () => {
-        const pool = inventoryPoolIndex(SECTIONS, RECORD);
+    it("the unavailable note obeys the scope that the read carries", () => {
+        const pool = answerPackagesQuery({ kind: "unavailable", scope: "pool", reason: "no graph" }, {});
+        const farm = answerPackagesQuery({ kind: "unavailable", scope: "farm" }, {});
 
-        expect(resolveQuery({ spelling: "stats", track: "r" }, pool)).toEqual({ kind: "resolved", identity: rIdentity("stats") });
-        expect(resolveQuery({ spelling: "json" }, pool)).toEqual({ kind: "resolved", identity: pythonIdentity("json") });
-    });
-
-    // A system tool or a node package is not a package of a track, thus a plan
-    // entry of its name does not link, and the index must not hold it.
-    it("does not resolve a row of an untracked section", () => {
-        expect(resolveQuery({ spelling: "samtools" }, inventoryPoolIndex(SECTIONS, RECORD))).toEqual({ kind: "unknown" });
-    });
-
-    it("holds no base name without a record", () => {
-        expect(resolveQuery({ spelling: "stats" }, inventoryPoolIndex(SECTIONS))).toEqual({ kind: "unknown" });
+        expect(pool.available === false ? pool.content : "").toContain("the package pool could not be read");
+        expect(farm.available === false ? farm.content : "").toMatch(/probe/i);
     });
 });
 

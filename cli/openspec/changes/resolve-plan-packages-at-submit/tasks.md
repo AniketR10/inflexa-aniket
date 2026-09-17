@@ -1,16 +1,17 @@
 ## 1. The seam resolution
 
-- [x] 1.1 In `src/modules/libs/composition.ts`, move the switch over a `QueryResolution` into one function. `resolvePackageRequest` calls it over the graph index.
-- [x] 1.2 In the same file, make `linkPackagesIntoFarm` read the image record of the store. Join `imagePoolIndex` to the graph index, and resolve each query one time.
-- [x] 1.3 In the same file, answer `present` with the runtime version for an identity that only the image holds. Link nothing for it.
-
-- [x] 1.4 In the same file, refuse a pin of a version that the runtime of the image does not hold.
-- [x] 1.5 In the same file, answer an `ambiguous` pair of the joined index with a collision. Name the runtime of the image as the claim of an image track.
+- [x] 1.1 In `src/modules/libs/composition.ts`, make `linkPackagesIntoFarm` read the image record of the store one time for the batch.
+- [x] 1.2 In the same file, answer `unavailable` for each query when the record does not parse. Give the empty image base when the record is absent.
+- [x] 1.3 In the same file, resolve each query with `resolvePackage` of the harness, over the graph index and the image base.
+- [x] 1.4 In the same file, answer `present` with the runtime version for an `image` answer, and link nothing for it.
+- [x] 1.5 In the same file, refuse an `image_version` answer with `unknown_version`.
+- [x] 1.6 In the same file, build the claims of an ambiguous spelling with a total `claimOf`.
+- [x] 1.7 In the same file, keep the body of `resolvePackageRequest` for `store link` and `store add`.
 
 ## 2. The tests
 
-- [x] 2.1 In `src/modules/libs/composition.test.ts`, add the three scenarios: a base R package is present, a standard-library module is present, and a store with no record keeps the answer of the graph.
-- [x] 2.2 In the same file, add the two scenarios of the review: a pin of a version that the runtime does not hold refuses, and a two-source ambiguity reports a collision with both prefixed forms.
+- [x] 2.1 In `src/modules/libs/composition.test.ts`, add the scenarios: a base R package is present, a standard-library module is present, and a store with no record keeps the answer of the graph.
+- [x] 2.2 In the same file, add the scenarios: a wrong pin refuses, a pool spelling keeps its answer, a collision of two image claims, and a damaged record answers unavailable.
 
 ## 3. Verification
 

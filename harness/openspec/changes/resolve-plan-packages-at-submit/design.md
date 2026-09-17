@@ -28,8 +28,9 @@ these two sets. Thus no reader can count them as present.
 
 - A change to the string grammar, a tolerated list, or an object shape for an
   entry.
-- A version resolution at the submit. The census holds only the newest pin of each
-  package. Thus the link pass stays the only reader of a version.
+- A version resolution of a pool package at the submit. The census holds only
+  the newest pin of each package. Thus the link pass stays the reader of that
+  version.
 - A change to the `names` path of `list_available_packages`, or to the text of
   the planner prompt.
 - A resolution in the pre-launch validation of a stored plan. The link pass
@@ -39,46 +40,72 @@ these two sets. Thus no reader can count them as present.
 
 ### The index is an option of `validatePlan`
 
-`ValidatePlanOptions` gains `pool?: PoolIndex`. The resolution runs only on an
-entry that parses, and only when the caller gives the index. Thus
+`ValidatePlanOptions` gains `packages?: PackageSources`: a pool index and an
+image base. The resolution runs only on an entry that parses, and only when the
+caller gives the sources. Thus
 `execute_analysis` plan mode keeps its behavior, and a stored plan still
 validates.
 
 An alternative was a second validation function for the planner. It gives two
 lists of rules that can drift, thus the option is better.
 
-### The planner builds the index from the one census read
+### The planner takes the sources from the one census read
 
-`readInventorySections` already reads the pool sections and the image record
-for the seed. Its `sections` arm gains the valid record that it merged. A new
-function, `inventoryPoolIndex`, builds the index from the tracked sections and
-that record. The planner reads the inventory one time, renders the seed block
-from that read, and builds the index from the same read. Thus the seed and the
-validator see one state of the store.
+`readInventorySections` reads the pool sections and the image record for the
+seed. Its read carries its own scope (`pool` or `farm`) and its own sources: a
+pool index over the tracked rows, and the image base of the record. The planner
+renders the seed block from that read, and it takes the sources from the same
+read. Thus the seed and the validator see one state of the store.
 
-The planner builds the index only when the embedder binds `readPoolInventory`,
-and only when the read gives sections. The farm-lock fallback describes one
-farm, and the farm of a new analysis is empty. An index over that farm refuses
-each package. An `unavailable` read gives no index, because an unreadable pool
-must not refuse a package that the pool holds.
+The read carries the sources, not the record. A caller that rebuilds an index
+from the record can forget the record, and it then drops the base sets with no
+signal. The read carries the scope, thus no caller passes a wrong boolean.
 
-### The image gives a pool index, and two indexes join
+The planner takes the sources only from a `pool` read. The farm-lock fallback
+describes one farm, and the farm of a new analysis is empty. A resolution over
+that farm refuses each package. An `unavailable` read gives no sources, because
+an unreadable pool must not refuse a package that the pool holds.
+
+### A package resolves over the pool first, then over the image
 
 `image-packages.json` gains `r_base` and `python_stdlib`, two optional string
-arrays. The schema number stays 1, because the fields are additive, and a
-record from before this change still parses. `imagePoolIndex(record)` makes an
-R identity for each `r_base` name and a Python identity for each
-`python_stdlib` name.
+arrays. The schema number stays 1, because the fields are additive. `imageBaseOf`
+makes an index of the two sets, and it keeps the runtime version of each track.
 
-`joinPoolIndexes(first, second)` in `package-identity.ts` answers `has` when
-one of the two indexes holds the identity. It answers `rIdentitiesFoldingTo`
-with the identities of the two indexes, once for each key. The ladder then runs
-one time over the joined index. Thus a base name and a pool name of one
-spelling obey the same ambiguity rule as two pool names.
+`resolvePackage(query, sources)` holds the rule, and the validator and the link
+pass of the cli both call it. It resolves in two steps:
 
-An alternative was a lookup of the base sets before the ladder. That lookup gives
-a different answer from the ladder for a spelling that the pool and the image
-both hold, thus the join is better.
+1. Resolve the query over the pool index. A `resolved` answer is the answer.
+2. Otherwise, resolve the query over the pool index joined with the image index.
+
+The pool ranks above the image. The package store holds the R package
+`optparse`, and Python 3.12 lists `optparse` in its standard library. A peer
+join makes a bare `optparse` ambiguous, and a step that resolved before then
+refuses. The two-step rule keeps `r:optparse`.
+
+The answer names its source. When only the image resolves the identity, a pin
+compares with the runtime version, because the image holds one version of each
+base package. A wrong pin gives `image_version`, thus the submit refuses what
+the launch refuses.
+
+An alternative was a join of the two indexes as peers. It refuses a name that
+resolves today. Another alternative was a lookup of the image BEFORE the ladder.
+It lets an image name hide a pool name, thus the pool-first order is better.
+
+### The seam contract carries a package of the image
+
+The harness owns the contract of the farm-extension seam. Thus the harness
+widens it before the cli uses it:
+
+- `present` means that the package is importable with no new link. The farm
+  linked it already, or the image holds it.
+- A `collision` carries two claims in `storeDirs`. A claim is a store directory,
+  or a runtime of the image.
+- The launch refusal states that "two sources claim it". It promises no two
+  directories.
+
+The field keeps the name `storeDirs`, because a rename breaks each embedder of
+the seam for one rare case.
 
 ### The record is the source of the two sets
 
@@ -86,6 +113,8 @@ both hold, thus the join is better.
 `installed.packages(priority = "base")`. Python gives `sys.stdlib_module_names`.
 The script runs in the runtime stage with the interpreters that a sandbox runs.
 Thus the record cannot disagree with the image. An empty set fails the build.
+A private module name with a leading underscore is left out, because no plan can
+name one.
 
 An alternative was a constant list in the harness. The Python set changes with
 each interpreter version, and a constant does not change with the image, thus the
@@ -93,10 +122,10 @@ record is better.
 
 ### The link pass of the cli answers `present` for an image package
 
-The cli joins the image index to the graph index before the ladder. When the
-ladder resolves an identity that the graph does not hold, the image holds it.
-Then the seam answers `present`, with the runtime version of the record, and it
-links nothing. The companion cli change holds that requirement.
+The cli calls `resolvePackage` over the graph index and the image base. An
+`image` answer is `present`, with the runtime version, and it links nothing. A
+damaged record answers `unavailable` for each query, and an absent record gives
+the empty image base. The companion cli change holds these requirements.
 
 ## Risks / Trade-offs
 
@@ -107,8 +136,11 @@ links nothing. The companion cli change holds that requirement.
 - [An embedder binds `readPoolInventory` and no link seam] → The submit refuses
   a name that the launch does not resolve. The census is the statement of what the
   store holds, thus the refusal is correct for that store.
-- [A pinned version that the pool does not hold passes the submit] → The link
-  pass refuses it at the launch, the same as before.
+- [A pinned version of a pool package that the pool does not hold passes the
+  submit] → The link pass refuses it at the launch, the same as before.
+- [A new Python version or a new R package adds a name that the pool and the
+  image both hold] → The pool ranks first, thus the name keeps the answer of the
+  pool.
 - [The seed and the submit read one census, and an acquisition lands during the
   loop] → The submit can refuse a package that just arrived. The next plan
   invocation reads the new census.

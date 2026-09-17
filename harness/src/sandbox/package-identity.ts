@@ -268,6 +268,24 @@ export type PoolIndex = {
 };
 
 /**
+ * A {@link PoolIndex} over a fixed list of identities. The identities merge by
+ * their key, thus an identity that the list names two times is one candidate
+ * of a suggestion, and not a coin flip between two. The suggestion reads the
+ * address of each R identity, which is the fold that a store directory uses.
+ *
+ * @param identities The identities that the index holds.
+ */
+export function poolIndexOver(identities: Iterable<PackageIdentity>): PoolIndex {
+    const byKey = new Map<string, PackageIdentity>();
+    for (const identity of identities) byKey.set(identityKey(identity), identity);
+    const rIdentities = [...byKey.values()].filter((identity) => identity.track === "r");
+    return {
+        has: (identity) => byKey.has(identityKey(identity)),
+        rIdentitiesFoldingTo: (spellingFold) => rIdentities.filter((identity) => identityAddress(identity) === spellingFold),
+    };
+}
+
+/**
  * One index over the identities of two indexes.
  *
  * `has` answers true when one of the two holds the identity. The R identities

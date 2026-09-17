@@ -26,8 +26,20 @@
 - [x] 4.4 In the same file, pass the index through `buildInnerTools` to `fullyValidate`, and from there to `validatePlan`.
 - [x] 4.5 In `src/tools/sandbox/catalog-tools.test.ts`, add the scenarios of `inventoryPoolIndex`: a tracked row resolves, a base name of the record resolves, and an untracked row does not resolve.
 
-## 5. Verification
+## 5. The review of pull request 548
 
-- [x] 5.1 Run `bun run format:file` on each changed source file.
-- [x] 5.2 Run `tsc -p tsconfig.json`. Run `bun test` on the changed test files.
-- [x] 5.3 Run `openspec validate resolve-plan-packages-at-submit --strict`.
+- [x] 5.1 In `src/sandbox/image-packages.ts`, add `imageBaseOf`, `EMPTY_IMAGE_BASE`, and `resolvePackage`. Resolve over the pool first, then over the pool and the image.
+- [x] 5.2 In the same function, compare a pin of an image package with the runtime version.
+- [x] 5.3 In `src/sandbox/package-identity.ts`, add `poolIndexOver`. Use it in the image base and in the `names` path of the census.
+- [x] 5.4 In `src/schemas/validate-plan.ts`, take `PackageSources`, and refuse `image_version` with the runtime version.
+- [x] 5.5 In `src/tools/sandbox/list-available-packages.ts`, give each read its scope and its sources. Remove the record field and the positional scope boolean.
+- [x] 5.6 In `src/tools/research/generate-plan.ts`, render the packages block with the shared renderer.
+- [x] 5.7 In `src/sandbox/types.ts`, widen `present` and the claims of a `collision`. Change the launch sentence in `src/tools/execute-analysis.ts`, the `link_packages` description, and the package-link prompt layer.
+- [x] 5.8 In `images/sandbox-base/scripts/image-record.py`, leave out a private stdlib name.
+- [x] 5.9 Add the tests: `optparse` keeps the pool answer, a wrong pin refuses at the submit, and the read carries its scope and its sources.
+
+## 6. Verification
+
+- [x] 6.1 Run `bun run format:file` on each changed source file.
+- [x] 6.2 Run `tsc -p tsconfig.json`. Run `bun test` on the changed test files.
+- [x] 6.3 Run `openspec validate resolve-plan-packages-at-submit --strict`.

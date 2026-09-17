@@ -1,8 +1,9 @@
 ## Context
 
-`linkPackagesIntoFarm` resolves each query with `resolvePackageRequest`, over
-the pool index of the graph. The harness now gives `imagePoolIndex` and
-`joinPoolIndexes`, and the planner joins the two indexes at the submit.
+`linkPackagesIntoFarm` resolved each query with `resolvePackageRequest`, over the
+pool index of the graph. The harness now gives `resolvePackage`, `imageBaseOf`,
+and `EMPTY_IMAGE_BASE`. The plan validation calls `resolvePackage` at the
+submit.
 
 ## Goals / Non-Goals
 
@@ -17,39 +18,40 @@ the pool index of the graph. The harness now gives `imagePoolIndex` and
 
 ## Decisions
 
-### The ladder runs one time over the joined index
+### The seam route calls the rule of the harness
 
-The seam route joins the image index to the graph index, and it calls
-`resolveQuery` one time. The switch over the answer moves into one function
-that `resolvePackageRequest` and the seam route both call. Thus the two routes
-share the version pick and the error shapes.
-
-An alternative was a lookup of the image before the ladder. That lookup gives a
-different answer for a spelling that the graph and the image both hold, thus
-the join is better.
+The seam route calls `resolvePackage` over the graph index and the image base.
+The cli holds no copy of the rule, thus the seam route and the submit cannot
+drift. The host still picks the version of a pool package with `pickVersion`.
+`resolvePackageRequest` keeps its body, because `store link` and `store add`
+read the graph alone.
 
 ### An image package is `present`, not `linked`
 
 The farm links a store directory, and the image package has none. The runtime
 of the image already loads it. Thus the outcome is `present`, and its version
-is the runtime version of the track in the record.
+is the runtime version of the track in the record. The harness contract states
+this meaning of `present`.
 
-### The image answers a version and an ambiguity by the rules of the pool
+### A damaged record is a fault, and an absent record is a normal state
 
-The image holds one version of a base package, which is the version of its
-runtime. A pin of another version refuses with `unknown_version`, thus a pinned
-entry reads alike on the two paths.
+`readImagePackagesFile` gives two errors. `record_unreadable` is a store from
+before the record, and it gives the empty image base. `record_invalid` is a
+damaged record. It answers `unavailable` for each query, with the path. A false
+`absent` for `r:stats` sends the agent after an acquisition that no repository
+can give. This is the rule of an unreadable graph.
 
-An `ambiguous` answer can name one track of the pool and one track of the
-image. The image track holds no store directory, thus the shared switch over
-the graph shelves cannot answer it. The seam route builds that refusal itself,
-and the claim of the image track names the runtime of the image. The remedy of
-the refusal stays the prefix.
+### The claims of a collision come from both sources
 
-### A missing record gives an empty image index
+The claim of a track is the head store directory of the pool, or the runtime of
+the image. `claimOf` is total: it throws for an identity that neither source
+holds, because `resolvePackage` gives `ambiguous` only for two held identities.
+A silent fallback to the graph answer would report the pair as unknown.
 
-A store from before the record, or a record that does not parse, gives an index
-that holds nothing. Then the seam gives the answer of the graph alone.
+### The indexes are built one time for the batch
+
+The graph and the record are read one time for the batch. Thus the pool index
+and the image base are built one time too, and not for each query.
 
 ## Risks / Trade-offs
 

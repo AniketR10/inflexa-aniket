@@ -36,29 +36,21 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, re
 import { join } from "node:path";
 
 import {
+    EMPTY_IMAGE_BASE,
     FARM_LOCK_FILE,
     formatQuery,
     IMAGE_PACKAGES_FILE,
     identityAddress,
     identityKey,
     identityOf,
-    imagePoolIndex,
-    joinPoolIndexes,
+    imageBaseOf,
     parseIdentityKey,
     readFarmLock,
     readImagePackagesFile,
+    resolvePackage,
     resolveQuery,
 } from "@inflexa-ai/harness";
-import type {
-    FarmLock,
-    FarmResolution,
-    ImagePackages,
-    PackageIdentity,
-    PackageQuery,
-    PackageRequestOutcome,
-    PoolIndex,
-    QueryResolution,
-} from "@inflexa-ai/harness";
+import type { FarmLock, FarmResolution, ImageBase, PackageIdentity, PackageQuery, PackageRequestOutcome, PackageSources, PoolIndex } from "@inflexa-ai/harness";
 import { err, ok, type Result } from "neverthrow";
 import { z } from "zod";
 
@@ -641,16 +633,7 @@ function pickVersion(graph: DepsGraph, query: PackageQuery, identity: PackageIde
  * Thus a query with no version takes the head of that list.
  */
 export function resolvePackageRequest(graph: DepsGraph, query: PackageQuery): Result<ResolvedRequest, RequestResolutionError> {
-    return answerResolution(graph, query, resolveQuery(query, poolIndexOf(graph)));
-}
-
-/**
- * The graph answer of one ladder resolution: the version pick of a `resolved`
- * identity, and the error shape of the two other answers. `store link`, `store
- * add`, and the seam route share it, thus a version and a refusal read alike
- * whichever index the ladder ran over.
- */
-function answerResolution(graph: DepsGraph, query: PackageQuery, resolution: QueryResolution): Result<ResolvedRequest, RequestResolutionError> {
+    const resolution = resolveQuery(query, poolIndexOf(graph));
     switch (resolution.kind) {
         case "resolved":
             return pickVersion(graph, query, resolution.identity);
@@ -1661,11 +1644,19 @@ function absentOutcome(query: PackageQuery, failure: RequestResolutionError): Pa
     }
 }
 
-/** What claims one track of a spelling: a store directory of the pool, or the runtime of the image. */
-function claimOf(graph: DepsGraph, record: ImagePackages, image: PoolIndex, identity: PackageIdentity): string | undefined {
+/**
+ * What claims one track of an ambiguous spelling: the head store directory of
+ * the pool, or the runtime of the image for a base package.
+ *
+ * The claim is total. An `ambiguous` answer states that the sources hold both
+ * identities, thus an identity that neither source holds is a broken rule of
+ * `resolvePackage`, and not a state that a refusal can report.
+ */
+function claimOf(graph: DepsGraph, image: ImageBase, identity: PackageIdentity): string {
     const head = graph.byName[identity.track].get(identity.name)?.[0];
     if (head !== undefined) return head;
-    return image.has(identity) ? `the ${identity.track} runtime of the image (${record.runtimes[identity.track]})` : undefined;
+    if (image.index.has(identity)) return `the ${identity.track} runtime of the image (${image.runtimes[identity.track]})`;
+    throw new Error(`unreachable: an ambiguous answer names ${identityKey(identity)}, which neither the pool nor the image holds`);
 }
 
 /** The answer of the seam route for one query: a store directory of the pool, or a package of the image. */
@@ -1675,64 +1666,50 @@ type LinkResolution =
     | { readonly kind: "refused"; readonly failure: RequestResolutionError };
 
 /**
- * The valid image record at the root of the store, or `undefined`. A store
- * from before the record, and a record that does not parse, both give nothing:
- * the base sets are an enrichment, and the graph still answers without them.
- */
-function readStoreImageRecord(storeRoot: string): ImagePackages | undefined {
-    return readImagePackagesFile(join(storeRoot, IMAGE_PACKAGES_FILE)).unwrapOr(undefined);
-}
-
-/**
- * Resolve one query of the seam route over the graph AND the base sets of the
+ * Resolve one query of the seam route over the graph and the base sets of the
  * image.
  *
- * The ladder runs one time over the joined index, which is the index that the
- * planner validates a plan against. Thus `submit_plan` and this link give one
- * answer for each entry. A `resolved` identity that the graph does not hold is
- * a package of the image: the runtime of the image loads it, and no farm link
- * exists for it. Its version is the runtime version of its track.
+ * `resolvePackage` of the harness holds the rule, and the plan validation calls
+ * it too, thus `submit_plan` and this link give one answer for each entry. The
+ * host picks the version of a pool package. A package of the image links
+ * nothing, because its runtime loads it.
  */
-function resolveLinkRequest(graph: DepsGraph, record: ImagePackages | undefined, query: PackageQuery): LinkResolution {
-    const pool = poolIndexOf(graph);
-    const graphAnswer = (resolution: QueryResolution): LinkResolution =>
-        answerResolution(graph, query, resolution).match(
-            (answer): LinkResolution => ({ kind: "pool", answer }),
-            (failure): LinkResolution => ({ kind: "refused", failure }),
-        );
-    if (record === undefined) return graphAnswer(resolveQuery(query, pool));
-
-    const image = imagePoolIndex(record);
-    const resolution = resolveQuery(query, joinPoolIndexes(pool, image));
-    if (resolution.kind === "resolved" && !pool.has(resolution.identity)) {
-        // The image holds one version of a base package: the version of its own
-        // runtime. Thus a pin of a different version refuses, the same as a pin
-        // that the pool does not hold.
-        const version = record.runtimes[resolution.identity.track];
-        if (query.version !== undefined && query.version !== version) {
-            return { kind: "refused", failure: { type: "unknown_version", version: query.version, available: [version] } };
-        }
-        return { kind: "image", version };
-    }
-    if (resolution.kind === "ambiguous") {
-        // One side of the ambiguity can be a base package of the image, and its
-        // track holds no store directory. `answerResolution` reads the two
-        // shelves of the graph alone, thus it would report the pair as unknown
-        // and lose the one remedy that a caller can act on: name the track.
-        const python = claimOf(graph, record, image, resolution.python);
-        const r = claimOf(graph, record, image, resolution.r);
-        if (python !== undefined && r !== undefined) {
+function resolveLinkRequest(graph: DepsGraph, sources: PackageSources, query: PackageQuery): LinkResolution {
+    const resolution = resolvePackage(query, sources);
+    switch (resolution.kind) {
+        case "pool":
+            return pickVersion(graph, query, resolution.identity).match(
+                (answer): LinkResolution => ({ kind: "pool", answer }),
+                (failure): LinkResolution => ({ kind: "refused", failure }),
+            );
+        case "image":
+            return { kind: "image", version: resolution.version };
+        case "image_version":
+            // The image holds one version of a base package, thus a pin of a
+            // different version refuses, the same as a pin that the pool lacks.
+            return { kind: "refused", failure: { type: "unknown_version", version: query.version ?? resolution.held, available: [resolution.held] } };
+        case "ambiguous":
+            // The pair is Python first, because a caller renders the tracks in
+            // that order. A claim can be a runtime of the image, thus the claims
+            // come from both sources and not from the two graph shelves alone.
             return {
                 kind: "refused",
                 failure: {
                     type: "ambiguous_ecosystem",
                     identities: [identityKey(resolution.python), identityKey(resolution.r)],
-                    candidates: [python, r],
+                    candidates: [claimOf(graph, sources.image, resolution.python), claimOf(graph, sources.image, resolution.r)],
                 },
             };
+        case "unknown":
+            return {
+                kind: "refused",
+                failure: { type: "unknown_distribution", ...(resolution.suggestion === undefined ? {} : { suggestion: identityKey(resolution.suggestion) }) },
+            };
+        default: {
+            const unreachable: never = resolution;
+            throw new Error(`unhandled package resolution: ${JSON.stringify(unreachable)}`);
         }
     }
-    return graphAnswer(resolution);
 }
 
 /**
@@ -1764,9 +1741,20 @@ export async function linkPackagesIntoFarm(storeRoot: string, analysisId: string
         return queries.map((query) => ({ kind: "unavailable", spelling: query.spelling, reason }));
     }
     const graph = read.value;
-    const record = readStoreImageRecord(storeRoot);
+    // An absent record is a store from before the record, a normal state: the
+    // image base holds nothing, and the graph answers alone. A damaged record
+    // is a structural fault. It answers `unavailable` WITH its path, for the
+    // same reason as an unreadable graph: a false absence of `r:stats` sends
+    // the agent after an acquisition that no repository can give.
+    const record = readImagePackagesFile(join(storeRoot, IMAGE_PACKAGES_FILE));
+    if (record.isErr() && record.error.type === "record_invalid") {
+        const reason = `the image record ${record.error.recordPath} does not parse, thus the base packages of the image are unknown`;
+        return queries.map((query) => ({ kind: "unavailable", spelling: query.spelling, reason }));
+    }
+    // The two indexes are built one time for the batch, as the graph is read one time.
+    const sources: PackageSources = { pool: poolIndexOf(graph), image: record.isOk() ? imageBaseOf(record.value) : EMPTY_IMAGE_BASE };
 
-    const resolutions = queries.map((query) => ({ query, resolved: resolveLinkRequest(graph, record, query) }));
+    const resolutions = queries.map((query) => ({ query, resolved: resolveLinkRequest(graph, sources, query) }));
     const roots = [...new Set(resolutions.flatMap(({ resolved }) => (resolved.kind === "pool" ? [resolved.answer.storeDir] : [])))];
 
     // The closure of the farm BEFORE the extension, which is what tells `present`

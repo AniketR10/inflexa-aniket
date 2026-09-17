@@ -19,8 +19,9 @@ The image MUST bake its inventory as one JSON record at
   `name` and the `version`.
 - `r_base` — the name of each R package that the R runtime of the image
   installs at the priority `base`.
-- `python_stdlib` — each name of `sys.stdlib_module_names` of the Python
-  runtime of the image.
+- `python_stdlib` — each public name of `sys.stdlib_module_names` of the
+  Python runtime of the image. A private name with a leading underscore, such
+  as `_abc`, MUST NOT appear, because no plan can name one.
 
 The keys `system_tools` and `node` MUST equal the manifest keys. Additive
 fields pass through, and a breaking change MUST move the schema number.
@@ -63,7 +64,7 @@ with no signal. The store mount point MUST stay empty in the image.
 #### Scenario: The record carries the base sets of the runtimes
 
 - **WHEN** `/opt/inflexa/image-packages.json` is read in a running container
-- **THEN** `r_base` holds `stats` and `grid`, and `python_stdlib` holds `json` and `pickle`
+- **THEN** `r_base` holds `stats` and `grid`, and `python_stdlib` holds `json` and `pickle` and no name with a leading underscore
 
 #### Scenario: A record from before the base sets still parses
 

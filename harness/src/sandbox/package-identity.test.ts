@@ -9,6 +9,7 @@ import {
     joinPoolIndexes,
     parseIdentityKey,
     parseQuery,
+    poolIndexOver,
     pythonIdentity,
     rIdentity,
     resolveQuery,
@@ -182,5 +183,14 @@ describe("package-identity — two joined pool indexes", () => {
         const joined = joinPoolIndexes(poolOf([pythonIdentity("grid")]), poolOf([rIdentity("grid")]));
 
         expect(resolveQuery({ spelling: "grid" }, joined)).toEqual({ kind: "ambiguous", python: pythonIdentity("grid"), r: rIdentity("grid") });
+    });
+});
+
+describe("package-identity — a pool index over a list of identities", () => {
+    it("holds each identity of the list, and one identity listed two times suggests one time", () => {
+        const pool = poolIndexOver([rIdentity("Seurat"), rIdentity("Seurat"), pythonIdentity("scanpy")]);
+
+        expect(pool.has(pythonIdentity("scanpy"))).toBe(true);
+        expect(resolveQuery({ spelling: "seurat" }, pool)).toEqual({ kind: "unknown", suggestion: rIdentity("Seurat") });
     });
 });

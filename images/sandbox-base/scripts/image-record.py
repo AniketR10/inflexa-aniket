@@ -72,12 +72,15 @@ def r_base_packages():
 
 
 def python_stdlib_modules():
-    """Return the names of the standard-library modules of this interpreter, sorted.
+    """Return the public names of the standard-library modules of this interpreter, sorted.
 
     The script runs under the system python3 of the runtime stage, which is the
     interpreter that a sandbox runs. Thus the set is the set of the image.
+
+    A private module such as `_abc` is left out. No plan can name one, and the
+    fold would give it the address `-abc`.
     """
-    names = sorted(sys.stdlib_module_names)
+    names = sorted(name for name in sys.stdlib_module_names if not name.startswith("_"))
     if not names:
         raise ValueError("the Python runtime reports no standard-library module")
     return names
