@@ -8,8 +8,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { context, propagation, ROOT_CONTEXT, trace, TraceFlags, type Span as ApiSpan } from "@opentelemetry/api";
+import { isTracingSuppressed } from "@opentelemetry/core";
 import { InMemorySpanExporter, SimpleSpanProcessor, type ReadableSpan } from "@opentelemetry/sdk-trace-base";
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 
 import { submitExec } from "../sandbox/submit-exec.js";
 import type { SandboxRef } from "../sandbox/types.js";
@@ -19,17 +19,18 @@ import {
     ATTR_INFLEXA_TOOL_USE_ID,
     createHarnessSampler,
     DbosSpanProcessor,
+    HarnessTracerProvider,
     stableSpan,
     untracedWorkflow,
 } from "./otel-spans.js";
 
 let exporter: InMemorySpanExporter;
-let provider: NodeTracerProvider;
+let provider: HarnessTracerProvider;
 let untracedCounter = 0;
 
 beforeEach(() => {
     exporter = new InMemorySpanExporter();
-    provider = new NodeTracerProvider({
+    provider = new HarnessTracerProvider({
         sampler: createHarnessSampler(),
         spanProcessors: [new DbosSpanProcessor(new SimpleSpanProcessor(exporter))],
     });
@@ -179,21 +180,21 @@ describe("stableSpan", () => {
     });
 });
 
+const REF: SandboxRef = {
+    sandboxId: "sbx-1",
+    host: "127.0.0.1",
+    port: 8765,
+    backend: "docker",
+    callbackSecret: "base64:dGVzdHNlY3JldA==",
+};
+
+/** A `runStep` that opens a span with the DBOS step name and runs the body under it, as DBOS does. */
+function spanStep<T>(work: () => Promise<T>, config: { name: string }): Promise<T> {
+    const span = tracer().startSpan(config.name);
+    return under(span, work).finally(() => span.end());
+}
+
 describe("a step body that calls stableSpan", () => {
-    const REF: SandboxRef = {
-        sandboxId: "sbx-1",
-        host: "127.0.0.1",
-        port: 8765,
-        backend: "docker",
-        callbackSecret: "base64:dGVzdHNlY3JldA==",
-    };
-
-    /** A `runStep` that opens a span with the DBOS step name and runs the body under it, as DBOS does. */
-    const spanStep = <T>(work: () => Promise<T>, config: { name: string }): Promise<T> => {
-        const span = tracer().startSpan(config.name);
-        return under(span, work).finally(() => span.end());
-    };
-
     it("submitExec exports sandbox.submit-exec with the exec id as an attribute", async () => {
         const execId = "wf-1:s-a:fn-0";
         const accepted: typeof fetch = (async () =>
@@ -206,5 +207,22 @@ describe("a step body that calls stableSpan", () => {
 
         expect(exportedNames()).toEqual(["sandbox.submit-exec"]);
         expect(exportedByName("sandbox.submit-exec").attributes).toMatchObject({ [ATTR_INFLEXA_EXEC_ID]: execId });
+    });
+});
+
+describe("untracedFetch", () => {
+    it("sends the step span's traceparent to sandbox-server and runs the fetch with tracing suppressed", async () => {
+        const execId = "wf-1:s-a:fn-0";
+        let sent: { headers: Record<string, string>; suppressed: boolean } | undefined;
+        const accepted = (async (_url: string, init: RequestInit & { headers: Record<string, string> }) => {
+            sent = { headers: init.headers, suppressed: isTracingSuppressed(context.active()) };
+            return new Response(JSON.stringify({ execId, status: "started" }), { status: 202 });
+        }) as unknown as typeof fetch;
+
+        await submitExec(REF, { command: ["echo", "hi"], execId }, { fetch: accepted, runStep: spanStep });
+
+        const step = exportedByName("sandbox.submit-exec");
+        expect(sent?.headers.traceparent).toBe(`00-${step.spanContext().traceId}-${step.spanContext().spanId}-01`);
+        expect(sent?.suppressed).toBe(true);
     });
 });

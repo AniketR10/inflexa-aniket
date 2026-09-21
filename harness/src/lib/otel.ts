@@ -4,13 +4,15 @@
  * Exported as `initOtel()` and called explicitly from the host's boot sequence
  * so the bundler cannot tree-shake it (side-effect-only imports get dropped).
  *
- * Traces: NodeTracerProvider exports to OTLP when OTEL_EXPORTER_OTLP_ENDPOINT
- *         is set. The provider carries the span policy of otel-spans.ts: the
- *         root span of a workflow declared with `untracedWorkflow` is not
- *         recorded (and its children with it), a replayed `cached=true` span
- *         is dropped before export, and a step body that calls `stableSpan`
- *         is exported under a stable name with its id in an `inflexa.*`
- *         attribute.
+ * Traces: HarnessTracerProvider exports to OTLP when
+ *         OTEL_EXPORTER_OTLP_ENDPOINT is set. The provider carries the span
+ *         policy of otel-spans.ts: the root span of a workflow declared with
+ *         `untracedWorkflow` is not recorded (and its children with it), a
+ *         replayed `cached=true` span is dropped before export, a step body
+ *         that calls `stableSpan` is exported under a stable name with its id
+ *         in an `inflexa.*` attribute, and a span declared with
+ *         `passThroughSpan` is not written, its children attached to its
+ *         parent.
  *
  * Metrics: MeterProvider exports to OTLP when OTEL_EXPORTER_OTLP_ENDPOINT is
  *          set and OTEL_METRICS_EXPORTER is not `none`. The export interval is
@@ -21,11 +23,13 @@
  *          to their record sites. Every instrument binds lazily to the
  *          provider registered here.
  *
- * Resource: the host's `serviceName` / `serviceVersion` merged with the SDK
- *           env detector (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`);
- *           the environment wins on a conflict, so a deployment can set
+ * Resource: the SDK's default resource (`telemetry.sdk.*`), under the host's
+ *           `serviceName` / `serviceVersion`, under the SDK env detector
+ *           (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`). A later layer
+ *           wins on a conflict, so a deployment can set
  *           `deployment.environment.name` or override the service name without
- *           a code change. Traces and metrics share the one resource.
+ *           a code change, and the default `unknown_service` name never
+ *           reaches an export. Traces and metrics share the one resource.
  *
  * Note: OTEL's instrumentation-http patches node:http but does not cover
  *        Hono's request handling or Node 22's undici-based globalThis.fetch,
@@ -37,14 +41,13 @@ import { context, propagation, metrics, trace } from "@opentelemetry/api";
 
 import { createNoopLogger } from "./console-logger.js";
 import type { Logger } from "./logger.js";
-import { createHarnessSampler, DbosSpanProcessor } from "./otel-spans.js";
+import { createHarnessSampler, DbosSpanProcessor, HarnessTracerProvider } from "./otel-spans.js";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { MeterProvider, PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
-import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { BatchSpanProcessor, type SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
-import { detectResources, envDetector, resourceFromAttributes, type Resource } from "@opentelemetry/resources";
+import { defaultResource, detectResources, envDetector, resourceFromAttributes, type Resource } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 
 /** The SDK's own default when neither the host nor the environment says otherwise. */
@@ -60,7 +63,7 @@ export interface InitOtelOptions {
 }
 
 let initialized = false;
-let registeredTracerProvider: NodeTracerProvider | undefined;
+let registeredTracerProvider: HarnessTracerProvider | undefined;
 let registeredMeterProvider: MeterProvider | undefined;
 
 /**
@@ -89,9 +92,13 @@ function buildResource(options: InitOtelOptions): Resource {
         [ATTR_SERVICE_NAME]: options.serviceName ?? "cortex",
     };
     if (options.serviceVersion) manual[ATTR_SERVICE_VERSION] = options.serviceVersion;
-    // `merge` gives precedence to the argument: the environment overrides the
-    // host's values, which is the OTel SDK convention for env configuration.
-    return resourceFromAttributes(manual).merge(detectResources({ detectors: [envDetector] }));
+    // `merge` gives precedence to the argument. A provider that gets an explicit
+    // resource does not add the SDK default itself, so it is the bottom layer here.
+    // The environment overrides the host's values, which is the OTel SDK
+    // convention for env configuration.
+    return defaultResource()
+        .merge(resourceFromAttributes(manual))
+        .merge(detectResources({ detectors: [envDetector] }));
 }
 
 /**
@@ -123,7 +130,7 @@ export function initOtel(options: InitOtelOptions = {}): void {
             spanProcessors.push(new DbosSpanProcessor(new BatchSpanProcessor(new OTLPTraceExporter({ url: `${base}/v1/traces` }))));
         }
 
-        const tracerProvider = new NodeTracerProvider({
+        const tracerProvider = new HarnessTracerProvider({
             resource,
             sampler: createHarnessSampler(),
             spanProcessors,
